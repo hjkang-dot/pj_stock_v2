@@ -8,4 +8,7 @@
 - DB는 SQLite로 구성
 
 ### 작업 내역
+1. 폴더 만들기 backend, frontend, data
+2. gitignore 추가, README 추가
+
 
