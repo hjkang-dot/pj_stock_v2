@@ -21,3 +21,6 @@
 11. tests 폴더 만들기
 12. /health 테스트 test_health.py
 13. pytest 실행 uv run pytest
+14. db 폴더 만들기
+15. SQLite 연결 파일 만들기
+16. SQLite 연결 테스트 만들기 test_sqlite.py

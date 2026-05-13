@@ -21,3 +21,8 @@ data/cache/
 .DS_Store
 .vscode/
 .idea/
+
+# Local SQLite databases
+*.db
+*.sqlite
+*.sqlite3
