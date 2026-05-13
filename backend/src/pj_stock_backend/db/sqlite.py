@@ -32,3 +32,10 @@ def get_db() -> Generator[sqlite3.Connection]:
         yield connection
     finally:
         connection.close()
+
+def initialize_database() -> None:
+    schema_path = Path(__file__).parent / "schema" / "schema.sql"
+
+    with get_connection() as connection:
+        connection.executescript(schema_path.read_text(encoding="utf-8"))
+        connection.commit()

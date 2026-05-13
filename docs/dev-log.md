@@ -28,9 +28,24 @@
 16. SQLite 연결 테스트 만들기 test_sqlite.py
 17. .env 파일, .env.example 파일 만들기
 18. config.py에 setting 값 추가 dart_api_key, krx_api_key
+19. schema 폴더 만들기
+20. schema.sql 파일 만들기
+- base_date       KRX 기준일
+- stock_code      종목코드
+- stock_name      종목명
+- market          KOSPI / KOSDAQ
+- security_group  주권/증권구분 등
+- sector          업종/소속부 등
+- listed_date     상장일
+- listed_shares   상장주식수
+21. 스키마 초기화 함수 만들기 initialize_database()
+22. stocks 테이블 생성 init_db
+23. test_sqlite.py에 initialize_database_creates_stocks_table 테스트 만들기
 
 #### 데이터 수집
 
 1. collectors 폴더 만들기
 2. KRX 상장 종목 목록 가져오기 krx_collector.py
-
+- 수집된 컬럼 목록
+'ISU_CD'(종목코드), 'ISU_SRT_CD'(단축종목코드), 'ISU_NM'(종목명), 'ISU_ABBRV'(종목약칭), 'ISU_ENG_NM'(종목영문명), 'LIST_DD'(상장일), 'MKT_TP_NM'(시장유형), 'SECUGRP_NM'(증권그룹명), 'SECT_TP_NM'(섹터명), 'KIND_STKCERT_TP_NM'(주식종류), 'PARVAL'(액면가), 'LIST_SHRS'(상장주식수)
+3. 수집된 종목 목록 데이터 저장하기
