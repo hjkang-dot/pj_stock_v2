@@ -8,6 +8,8 @@
 - DB는 SQLite로 구성
 
 ### 작업 내역
+
+#### backend
 1. 폴더 만들기 backend, frontend, data
 2. gitignore 추가, README 추가
 3. backend 폴더내에 가상환경 생성 및 uv 설치
@@ -24,3 +26,11 @@
 14. db 폴더 만들기
 15. SQLite 연결 파일 만들기
 16. SQLite 연결 테스트 만들기 test_sqlite.py
+17. .env 파일, .env.example 파일 만들기
+18. config.py에 setting 값 추가 dart_api_key, krx_api_key
+
+#### 데이터 수집
+
+1. collectors 폴더 만들기
+2. KRX 상장 종목 목록 가져오기 krx_collector.py
+
