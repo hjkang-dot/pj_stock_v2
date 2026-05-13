@@ -1,0 +1,30 @@
+[project]
+name = "pj-stock-backend"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "'hj.kang-dot'", email = "'khj92409781@gmail.com'" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.136.1",
+    "pandas>=3.0.3",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.1",
+    "uvicorn>=0.46.0",
+]
+
+[project.scripts]
+backend = "pj_stock_backend.main:app"
+
+
+[build-system]
+requires = ["uv_build>=0.9.25,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "ruff>=0.15.12",
+]

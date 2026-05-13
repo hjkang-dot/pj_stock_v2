@@ -10,5 +10,8 @@
 ### 작업 내역
 1. 폴더 만들기 backend, frontend, data
 2. gitignore 추가, README 추가
-
+3. backend 폴더내에 가상환경 생성 및 uv 설치
+4. fastapi, uvicorn, pandas, pydantic, pydantic-settings 설치
+5. pytest, ruff 설치
+6. fastapi 테스트 완료 
 
