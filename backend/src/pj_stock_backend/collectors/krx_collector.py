@@ -12,8 +12,8 @@ KRX_BASE_URL = "http://data-dbg.krx.co.kr"
 
 
 MARKET_API_IDS: dict[str, str] = {
-    "KOSPI": "ksq_isu_base_info",
-    "KOSDAQ": "stk_isu_base_info",
+    "KOSPI": "stk_isu_base_info",
+    "KOSDAQ": "ksq_isu_base_info",
 }
 
 KRX_STOCK_API_PATH_PREFIX = "/svc/apis/sto"

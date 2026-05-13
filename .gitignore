@@ -26,3 +26,5 @@ data/cache/
 *.db
 *.sqlite
 *.sqlite3
+
+.pytest_tmp/
