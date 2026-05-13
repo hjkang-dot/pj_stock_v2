@@ -14,4 +14,10 @@
 4. fastapi, uvicorn, pandas, pydantic, pydantic-settings 설치
 5. pytest, ruff 설치
 6. fastapi 테스트 완료 
-
+7. api, core 폴더 만들기
+8. /health 라우터 파일 만들기
+9. main.py에 라우터 연결
+10. config 만들기
+11. tests 폴더 만들기
+12. /health 테스트 test_health.py
+13. pytest 실행 uv run pytest
