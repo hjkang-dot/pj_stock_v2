@@ -60,3 +60,15 @@
 8. 수집된 데이터 clean 하기 krx_stock_cleaner.py
 9. test_krx_stock_cleaner.py 파일 만들기
 10. clean_krx_listed_stocks.py 로 data/processed/stocks.csv 로 저장
+
+#### 데이터 수집 - 주가 daily_prices_{date}.csv
+
+1. krx_collector.py 내에 fetch_krx_daily_prices 만들기 
+2. scripts 내에 fetch_krx_daily_prices.py 로 data/raw/krx/daily_prices_{base_date}_{market}.csv 로 저장
+- 수집 목록
+'BAS_DD'(기준일), 'ISU_CD'(종목코드), 'ISU_NM'(종목명), 'MKT_NM'(시장명), 'SECT_TP_NM'(섹터), 'TDD_CLSPRC'(종가), 'CMPPREVDD_PRC'(전일비), 'FLUC_RT'(등락률), 'TDD_OPNPRC'(시가), 'TDD_HGPRC'(고가), 'TDD_LWPRC'(저가), 'ACC_TRDVOL'(거래량), 'ACC_TRDVAL'(거래대금), 'MKTCAP'(시가총액), 'LIST_SHRS'(상장주식수)
+3. clean 하기 krx_price_cleaner.py
+4. test_krx_price_cleaner.py 파일 만들기
+5. clean_krx_daily_prices.py 로 data/processed/daily_prices_{base_date}_{market}.csv 로 저장
+
+#### 데이터 수집 - 재무제표
