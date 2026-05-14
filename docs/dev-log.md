@@ -71,4 +71,8 @@
 4. test_krx_price_cleaner.py 파일 만들기
 5. clean_krx_daily_prices.py 로 data/processed/daily_prices_{base_date}_{market}.csv 로 저장
 
-#### 데이터 수집 - 재무제표
+#### 데이터 수집 - dart corp_codes.csv
+1. dart_collector.py 만들기
+2. corp_codes 가져오기 fetch_dart_corp_codes.py
+3. dart_corp_cleaner.py 로 상장사만 가져오기
+4. clean_dart_corp_codes.py 로 data/processed/dart_corp_codes.csv 로 저장
