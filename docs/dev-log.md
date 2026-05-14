@@ -46,7 +46,7 @@
 25. stock_repository.py 파일 만들기(csv 방식으로 변환)
 
 
-#### 데이터 수집
+#### 데이터 수집 - 종목 목록 stocks.csv
 
 1. collectors 폴더 만들기
 2. KRX 상장 종목 목록 가져오기 krx_collector.py
@@ -57,3 +57,6 @@
 5. 수집 데이터 저장할 csv_storage.py 파일 만들기 
 6. test_csv_storage.py 파일 만들기
 7. fetch_krx_listed_stocks.py 로 data/raw/krx 폴더에 종목 목록 csv로 저장
+8. 수집된 데이터 clean 하기 krx_stock_cleaner.py
+9. test_krx_stock_cleaner.py 파일 만들기
+10. clean_krx_listed_stocks.py 로 data/processed/stocks.csv 로 저장
