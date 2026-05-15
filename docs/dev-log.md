@@ -1,7 +1,5 @@
 # 개발 일지
 
-## 2026-05-13
-
 ### 오늘 결정한 것
 - 백엔드는 python + uv + FastAPI로 구성
 - 프론트엔드는 React로 구성
@@ -82,3 +80,12 @@
 2. dart_financial_statement_cleaner.py 만들기
 3. test_dart_financial_statement.py 만들기
 4. fetch_dart_financial_statements.py 로 data/raw/dart/financial_statements_{business_year}_{report_code}.csv 로 저장
+- 정리 항목
+rcept_no(접수번호),reprt_code(보고서코드),bsns_year(사업연도),corp_code(기업코드),stock_code(종목코드),fs_div,fs_nm,currency,fiscal_period(회계기간),current_assets(유동자산),non_current_assets(비유동자산),total_assets(자산총계),current_liabilities(유동부채),non_current_liabilities(비유동부채),total_liabilities(부채총계),total_equity(자본총계),revenue(매출액),operating_income(영업이익),net_income(당기순이익(손실)),debt_ratio(부채비율),current_ratio(유동비율),equity_ratio(자본비율),operating_margin(영업이익률),net_margin(순이익률)
+
+#### 데이터 수집 - dart 배당 정보
+1. dart_collector.py 내에 fetch_dart_dividend_info 만들기
+2. 스크립트 fetch_dart_dividends.py 로 data/raw/dart/dividends_{business_year}_{report_code}.csv 로 저장
+3. dart_dividend_cleaner.py 로 데이터 정리
+- 정리 항목
+rcept_no(접수번호),corp_cls(기업구분),corp_code(기업코드),corp_name(기업명),stock_knd(주식종류),fiscal_year(사업연도),settlement_date(결산일),par_value(액면가),consolidated_net_income_million(연결당기순이익(천원)),separate_net_income_million(별도당기순이익(천원)),eps(주당순이익(원)),cash_dividend_total_million(현금배당총액(천원)),stock_dividend_total_million(주식배당총액(천원)),cash_dividend_payout_ratio(현금배당성향(%) ),cash_dividend_yield(현금배당수익률(%)),stock_dividend_yield(주식배당수익률(%)),cash_dividend_per_share(주당현금배당액(원)),stock_dividend_per_share(주당주식배당액(주)),cash_dividend_total(현금배당총액),consolidated_net_income(연결당기순이익),cash_dividend_per_eps_ratio(현금배당성향(EPS 대비))
