@@ -9,6 +9,7 @@ from pj_stock_backend.core.config import settings
 
 
 DART_CORP_CODE_URL = "https://opendart.fss.or.kr/api/corpCode.xml"
+DART_SINGLE_ACCOUNT_URL = "https://opendart.fss.or.kr/api/fnlttSinglAcnt.json"
 
 
 def build_dart_params() -> dict[str, str]:
@@ -41,3 +42,29 @@ def fetch_corp_codes() -> pd.DataFrame:
         )
 
     return pd.DataFrame(rows)
+
+
+def fetch_financial_statement(
+    corp_code: str,
+    business_year: str,
+    report_code: str = "11011",
+) -> pd.DataFrame:
+    params = {
+        **build_dart_params(),
+        "corp_code": corp_code,
+        "bsns_year": business_year,
+        "reprt_code": report_code,
+    }
+
+    response = requests.get(DART_SINGLE_ACCOUNT_URL, params=params, timeout=30)
+    response.raise_for_status()
+
+    payload = response.json()
+    status = payload.get("status")
+
+    if status != "000":
+        message = payload.get("message", "Unknown DART API error")
+        msg = f"DART financial statement request failed: {status} {message}"
+        raise ValueError(msg)
+
+    return pd.DataFrame(payload.get("list", []))

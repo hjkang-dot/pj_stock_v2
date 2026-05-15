@@ -76,3 +76,9 @@
 2. corp_codes 가져오기 fetch_dart_corp_codes.py
 3. dart_corp_cleaner.py 로 상장사만 가져오기
 4. clean_dart_corp_codes.py 로 data/processed/dart_corp_codes.csv 로 저장
+
+#### 데이터 수집 - dart 연간재무제표
+1. dart_collector.py 내에 fetch_dart_financial_statement 만들기
+2. dart_financial_statement_cleaner.py 만들기
+3. test_dart_financial_statement.py 만들기
+4. fetch_dart_financial_statements.py 로 data/raw/dart/financial_statements_{business_year}_{report_code}.csv 로 저장
