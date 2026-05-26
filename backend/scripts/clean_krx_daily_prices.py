@@ -5,7 +5,7 @@ from pj_stock_backend.storage.csv_storage import load_dataframe_csv, save_datafr
 
 
 def main() -> None:
-    base_date = "20260512"
+    base_date = "20260522"
 
     raw_paths = [
         f"../data/raw/krx/daily_prices_{base_date}_KOSPI.csv",

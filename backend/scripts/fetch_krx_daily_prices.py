@@ -3,7 +3,7 @@ from pj_stock_backend.storage.csv_storage import save_dataframe_csv
 
 
 def main() -> None:
-    base_date = "20260512"
+    base_date = "20260522"
 
     for market in ["KOSPI", "KOSDAQ"]:
         prices = fetch_daily_prices(market, base_date)

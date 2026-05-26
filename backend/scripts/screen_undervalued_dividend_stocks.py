@@ -10,7 +10,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--business-year", default="2025")
     parser.add_argument("--report-code", default="11011")
-    parser.add_argument("--base-date", default="20260512")
+    parser.add_argument("--base-date", default="20260522")
     parser.add_argument("--minimum-total-score", type=float, default=60.0)
     parser.add_argument("--top", type=int, default=30)
     args = parser.parse_args()

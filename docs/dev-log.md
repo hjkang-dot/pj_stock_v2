@@ -89,3 +89,28 @@ rcept_no(접수번호),reprt_code(보고서코드),bsns_year(사업연도),corp_
 3. dart_dividend_cleaner.py 로 데이터 정리
 - 정리 항목
 rcept_no(접수번호),corp_cls(기업구분),corp_code(기업코드),corp_name(기업명),stock_knd(주식종류),fiscal_year(사업연도),settlement_date(결산일),par_value(액면가),consolidated_net_income_million(연결당기순이익(천원)),separate_net_income_million(별도당기순이익(천원)),eps(주당순이익(원)),cash_dividend_total_million(현금배당총액(천원)),stock_dividend_total_million(주식배당총액(천원)),cash_dividend_payout_ratio(현금배당성향(%) ),cash_dividend_yield(현금배당수익률(%)),stock_dividend_yield(주식배당수익률(%)),cash_dividend_per_share(주당현금배당액(원)),stock_dividend_per_share(주당주식배당액(주)),cash_dividend_total(현금배당총액),consolidated_net_income(연결당기순이익),cash_dividend_per_eps_ratio(현금배당성향(EPS 대비))
+
+### 전략 - 저평가 배당주
+#### undervalued_dividend_strategy.py 
+- 재무, 배당, 주가, 종목목록 csv 가져와 screen_undervalued_dividend_stocks() 함수 실행
+- 종목별로 총점 계산
+- 상위 n개 종목만 저장
+- 저장된 종목 목록 출력
+
+#### 점수 평가표
+- 재무 안정성 20점
+  - ROE 12점
+  - 부채비율 8점
+- 저평가 30점
+  - PER 15점
+  - PBR 15점
+- 주주환원 30점
+  - 배당수익률 15점
+  - 배당지속성 15점
+- 시장지배력 20점
+  - 시장 구분 5점
+  - 시가 총액 5점
+  - 거래량 5점
+  - 상장 기간 5점
+- 총점 100점
+
