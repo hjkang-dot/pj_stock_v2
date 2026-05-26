@@ -41,3 +41,25 @@ def test_initialize_database_creates_stocks_table() -> None:
         assert row["name"] == "stocks"
     finally:
         connection.close()
+
+
+def test_initialize_database_creates_daily_prices_table() -> None:
+    initialize_database()
+
+    connection = get_connection()
+
+    try:
+        cursor = connection.execute(
+            """
+            select name
+            from sqlite_master
+            where type = 'table'
+              and name = 'daily_prices'
+            """
+        )
+        row = cursor.fetchone()
+
+        assert row is not None
+        assert row["name"] == "daily_prices"
+    finally:
+        connection.close()

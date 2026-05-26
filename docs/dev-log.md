@@ -69,6 +69,12 @@
 4. test_krx_price_cleaner.py 파일 만들기
 5. clean_krx_daily_prices.py 로 data/processed/daily_prices_{base_date}_{market}.csv 로 저장
 
+- 26-05-26
+6. 주가 DB에 저장할 수 있도록 shemas.sql 에 daily_prices 테이블 추가
+7. DB에 주가 넣을 수 있도록 daily_price_repository.py 내 upsert_daily_prices, get_daily_prices 추가 
+8. krx_daily_price_pipeline.py에 DB 동기화 파이프라인 추가
+9. 수집할 실행 스크립트 sync_krx_daily_prices_to_db.py 추가
+
 #### 데이터 수집 - dart corp_codes.csv
 1. dart_collector.py 만들기
 2. corp_codes 가져오기 fetch_dart_corp_codes.py
