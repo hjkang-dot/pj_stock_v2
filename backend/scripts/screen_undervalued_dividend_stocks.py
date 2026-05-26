@@ -1,5 +1,7 @@
 import argparse
 
+from pj_stock_backend.db.sqlite import get_connection
+from pj_stock_backend.repositories.daily_price_repository import get_daily_prices
 from pj_stock_backend.storage.csv_storage import load_dataframe_csv, save_dataframe_csv
 from pj_stock_backend.strategies.undervalued_dividend_strategy import (
     screen_undervalued_dividend_stocks,
@@ -23,10 +25,20 @@ def main() -> None:
         f"../data/processed/dividends_{args.business_year}_{args.report_code}.csv",
         dtype={"corp_code": str, "stock_code": str},
     )
-    daily_prices = load_dataframe_csv(
-        f"../data/processed/daily_prices_{args.base_date}.csv",
-        dtype={"stock_code": str},
-    )
+    with get_connection() as connection:
+        daily_prices = get_daily_prices(
+            connection,
+            start_date=args.base_date,
+            end_date=args.base_date,
+        )
+
+    if daily_prices.empty:
+        msg = (
+            f"No daily prices found in DB for {args.base_date}. "
+            "Run scripts/sync_krx_daily_prices_to_db.py first."
+        )
+        raise ValueError(msg)
+
     stocks = load_dataframe_csv(
         "../data/processed/stocks.csv",
         dtype={"stock_code": str, "listed_date": str},
