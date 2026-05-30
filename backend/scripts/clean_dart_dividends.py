@@ -1,10 +1,17 @@
+import argparse
+
 from pj_stock_backend.cleaners.dart_dividend_cleaner import clean_dividends
 from pj_stock_backend.storage.csv_storage import load_dataframe_csv, save_dataframe_csv
 
 
 def main() -> None:
-    business_year = "2025"
-    report_code = "11011"
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--business-year", default="2025")
+    parser.add_argument("--report-code", default="11011")
+    args = parser.parse_args()
+
+    business_year = args.business_year
+    report_code = args.report_code
 
     raw_path = "../data/raw/dart/" f"dividends_{business_year}_{report_code}.csv"
     output_path = "../data/processed/" f"dividends_{business_year}_{report_code}.csv"

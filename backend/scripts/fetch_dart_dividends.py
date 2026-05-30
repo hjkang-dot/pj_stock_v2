@@ -34,12 +34,13 @@ def main() -> None:
         "../data/raw/dart/" f"dividends_{args.business_year}_{args.report_code}.csv"
     )
     dividends = []
-    completed_stock_codes: set[str] = set()
+    completed_corp_codes: set[str] = set()
 
     if output_path.exists():
-        existing = load_dataframe_csv(output_path, dtype={"stock_code": str})
+        existing = load_dataframe_csv(output_path, dtype={"corp_code": str})
         dividends.append(existing)
-        completed_stock_codes = set(existing["stock_code"].dropna().astype(str))
+        if "corp_code" in existing.columns:
+            completed_corp_codes = set(existing["corp_code"].dropna().astype(str))
         print(f"resume from existing file: {output_path} rows={len(existing)}")
 
     for index, row in corp_codes.iterrows():
@@ -47,7 +48,7 @@ def main() -> None:
         stock_code = row["stock_code"]
         corp_name = row["corp_name"]
 
-        if stock_code in completed_stock_codes:
+        if corp_code in completed_corp_codes:
             print(f"[skip] {stock_code} {corp_name}: already saved")
             continue
 
@@ -65,7 +66,7 @@ def main() -> None:
             continue
 
         dividends.append(dividend)
-        completed_stock_codes.add(stock_code)
+        completed_corp_codes.add(corp_code)
         combined = pd.concat(dividends, ignore_index=True)
         save_dataframe_csv(combined, output_path)
 

@@ -96,6 +96,8 @@ def get_daily_prices(
     start_date: str | None = None,
     end_date: str | None = None,
     stock_code: str | None = None,
+    limit: int | None = None,
+    descending: bool = False,
 ) -> pd.DataFrame:
     conditions = []
     params = {}
@@ -114,13 +116,61 @@ def get_daily_prices(
     if conditions:
         where_clause = "where " + " and ".join(conditions)
 
+    order_dir = "desc" if descending else "asc"
+    limit_clause = ""
+    if limit is not None:
+        limit_clause = "limit :limit"
+        params["limit"] = limit
+
     return pd.read_sql_query(
         f"""
         select {", ".join(DAILY_PRICE_COLUMNS)}
         from daily_prices
         {where_clause}
-        order by trade_date, stock_code
+        order by trade_date {order_dir}
+        {limit_clause}
         """,
         connection,
         params=params,
     )
+
+
+def get_existing_trade_dates(connection: sqlite3.Connection, start_date: str) -> set[str]:
+    """Retrieve unique trade_dates from daily_prices since start_date."""
+    cursor = connection.cursor()
+    cursor.execute(
+        "select distinct trade_date from daily_prices where trade_date >= :start_date",
+        {"start_date": start_date}
+    )
+    return {row[0] for row in cursor.fetchall() if row[0]}
+
+
+def get_closed_market_dates(connection: sqlite3.Connection, start_date: str) -> set[str]:
+    """Retrieve trade_dates from market_closed_dates since start_date."""
+    cursor = connection.cursor()
+    cursor.execute(
+        "select trade_date from market_closed_dates where trade_date >= :start_date",
+        {"start_date": start_date}
+    )
+    return {row[0] for row in cursor.fetchall() if row[0]}
+
+
+def insert_closed_market_date(connection: sqlite3.Connection, trade_date: str) -> None:
+    """Insert a trade_date into market_closed_dates to mark it as holiday/closed."""
+    cursor = connection.cursor()
+    cursor.execute(
+        "insert or ignore into market_closed_dates (trade_date) values (:trade_date)",
+        {"trade_date": trade_date}
+    )
+    connection.commit()
+
+
+def get_latest_trade_date(connection: sqlite3.Connection) -> str | None:
+    """Retrieve the most recent trade_date present in the daily_prices table."""
+    cursor = connection.cursor()
+    cursor.execute("select max(trade_date) from daily_prices")
+    row = cursor.fetchone()
+    if row and row[0]:
+        return row[0]
+    return None
+

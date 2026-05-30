@@ -39,3 +39,19 @@ def initialize_database() -> None:
     with get_connection() as connection:
         connection.executescript(schema_path.read_text(encoding="utf-8"))
         connection.commit()
+
+
+def reset_company_financials_table() -> Path:
+    schema_path = Path(__file__).parent / "schema" / "schema.sql"
+    database_path = get_database_path()
+
+    with get_connection() as connection:
+        connection.executescript(
+            """
+            drop table if exists company_financials;
+            """
+        )
+        connection.executescript(schema_path.read_text(encoding="utf-8"))
+        connection.commit()
+
+    return database_path

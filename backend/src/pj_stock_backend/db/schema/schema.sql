@@ -5,6 +5,7 @@ create table if not exists stocks (
     market text not null,
     security_group text,
     sector text,
+    dart_corp_code text,
     listed_date text,
     listed_shares integer,
     is_active integer not null default 1,
@@ -41,3 +42,86 @@ on daily_prices (stock_code, trade_date);
 
 create index if not exists idx_daily_prices_trade_date
 on daily_prices (trade_date);
+
+create table if not exists company_financials (
+    id integer primary key autoincrement,
+    corp_code text not null,
+    stock_code text,
+    bsns_year integer not null,
+    fs_div text,
+    fs_nm text,
+    currency text,
+    fiscal_period text not null,
+    current_assets real,
+    non_current_assets real,
+    total_assets real,
+    current_liabilities real,
+    non_current_liabilities real,
+    total_liabilities real,
+    total_equity real,
+    revenue real,
+    operating_income real,
+    net_income real,
+    debt_ratio real,
+    current_ratio real,
+    equity_ratio real,
+    operating_margin real,
+    net_margin real,
+    par_value real,
+    eps real,
+    cash_dividend_yield real,
+    cash_dividend_per_share real,
+    cash_dividend_total real,
+    cash_dividend_payout_ratio real,
+    created_at text not null default current_timestamp,
+    updated_at text not null default current_timestamp,
+    unique (corp_code, fiscal_period)
+);
+
+create index if not exists idx_company_financials_corp_code_fiscal_period
+on company_financials (corp_code, fiscal_period);
+
+create index if not exists idx_company_financials_stock_code
+on company_financials (stock_code);
+
+create table if not exists market_closed_dates (
+    trade_date text primary key,
+    created_at text not null default current_timestamp
+);
+
+create table if not exists stock_evaluations (
+    id integer primary key autoincrement,
+    stock_code text not null,
+    business_year integer not null,
+    base_date text not null,
+    close_price integer,
+    market_cap integer,
+    net_income real,
+    total_equity real,
+    debt_ratio real,
+    roe real,
+    per real,
+    pbr real,
+    dividend_yield real,
+    cash_dividend_per_share real,
+    payout_ratio real,
+    dividend_years integer,
+    dividend_decrease_count integer,
+    current_ratio real,
+    revenue_growth real,
+    operating_income_growth real,
+    eps_growth real,
+    financial_stability_score real,
+    growth_score real,
+    undervaluation_score real,
+    shareholder_return_score real,
+    market_governance_score real,
+    total_score real,
+    is_candidate integer,
+    created_at text not null default current_timestamp,
+    updated_at text not null default current_timestamp,
+    unique (stock_code, business_year, base_date)
+);
+
+create index if not exists idx_stock_evaluations_stock_code
+on stock_evaluations (stock_code);

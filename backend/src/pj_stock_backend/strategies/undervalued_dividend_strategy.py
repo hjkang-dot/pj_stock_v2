@@ -12,6 +12,7 @@ OUTPUT_COLUMNS = [
     "net_income",
     "total_equity",
     "debt_ratio",
+    "current_ratio",
     "roe",
     "per",
     "pbr",
@@ -20,7 +21,11 @@ OUTPUT_COLUMNS = [
     "payout_ratio",
     "dividend_years",
     "dividend_decrease_count",
+    "revenue_growth",
+    "operating_income_growth",
+    "eps_growth",
     "financial_stability_score",
+    "growth_score",
     "undervaluation_score",
     "shareholder_return_score",
     "market_governance_score",
@@ -41,13 +46,78 @@ def screen_undervalued_dividend_stocks(
     """Score stocks for an undervalued dividend strategy."""
     as_of_year = as_of_year or date.today().year
 
-    growth_stock_codes = _revenue_and_operating_income_growth_stock_codes(
-        financial_statements,
+    # Remove duplicate financial statements (keep consolidate CFS first, latest source report)
+    if "fiscal_period" in financial_statements.columns:
+        financial_statements = financial_statements.copy()
+        financial_statements["fiscal_period_sort"] = pd.to_numeric(
+            financial_statements["fiscal_period"].astype(str).str.replace(".", "", regex=False),
+            errors="coerce",
+        )
+        if "fs_div" in financial_statements.columns:
+            financial_statements["fs_priority"] = financial_statements["fs_div"].map({"CFS": 1, "OFS": 2}).fillna(3)
+            financial_statements = financial_statements.sort_values(
+                ["corp_code", "fiscal_period_sort", "fs_priority"],
+                ascending=[True, True, True]
+            )
+        else:
+            financial_statements = financial_statements.sort_values(["corp_code", "fiscal_period_sort"])
+            
+        financial_statements = financial_statements.drop_duplicates(
+            subset=["corp_code", "bsns_year"],
+            keep="last"
+        ).drop(columns=["fiscal_period_sort", "fs_priority"], errors="ignore")
+
+    # Remove duplicate dividend data (prioritize rows with non-NaN eps and cash_dividend_per_share)
+    if not dividends.empty:
+        dividends = dividends.copy()
+        dividends["has_dps"] = pd.to_numeric(dividends["cash_dividend_per_share"], errors="coerce").fillna(0) > 0
+        dividends["has_eps"] = pd.to_numeric(dividends["eps"], errors="coerce").fillna(0) > 0
+        dividends["fiscal_year_num"] = pd.to_numeric(dividends["fiscal_year"], errors="coerce").fillna(0)
+        
+        dividends = dividends.sort_values(
+            ["corp_code", "fiscal_year_num", "has_dps", "has_eps"],
+            ascending=[True, True, False, False]
+        )
+        dividends = dividends.drop_duplicates(
+            subset=["corp_code", "fiscal_year"],
+            keep="first"
+        ).drop(columns=["has_dps", "has_eps", "fiscal_year_num"], errors="ignore")
+
+    # 1. Get latest financial year for each company (Filter removed)
+    latest_financials = _latest_financials(financial_statements).copy()
+    
+    # 2. Extract previous year financials to calculate growth rates
+    prev_fin = financial_statements[["corp_code", "bsns_year", "revenue", "operating_income"]].copy()
+    prev_fin = prev_fin.rename(
+        columns={
+            "bsns_year": "prev_bsns_year",
+            "revenue": "prev_revenue",
+            "operating_income": "prev_operating_income",
+        }
     )
-    latest_financials = _latest_financials(financial_statements)
-    latest_financials = latest_financials[
-        latest_financials["stock_code"].isin(growth_stock_codes)
-    ].copy()
+    
+    # Extract previous year dividends to calculate EPS growth rate
+    if "eps" in dividends.columns:
+        prev_div = dividends[["corp_code", "fiscal_year", "eps"]].copy()
+        prev_div["prev_bsns_year"] = pd.to_numeric(prev_div["fiscal_year"], errors="coerce")
+        prev_div = prev_div.rename(columns={"eps": "prev_eps"}).drop(columns=["fiscal_year"])
+    else:
+        prev_div = pd.DataFrame(columns=["corp_code", "prev_bsns_year", "prev_eps"])
+    
+    # Map previous business year (bsns_year - 1)
+    latest_financials["prev_bsns_year"] = latest_financials["bsns_year"] - 1
+    
+    # Merge previous year details
+    latest_financials = latest_financials.merge(
+        prev_fin,
+        on=["corp_code", "prev_bsns_year"],
+        how="left"
+    ).merge(
+        prev_div,
+        on=["corp_code", "prev_bsns_year"],
+        how="left"
+    )
+    
     latest_dividends = _latest_dividends(dividends)
     dividend_years = _dividend_years(dividends)
     dividend_decrease_counts = _dividend_decrease_counts(dividends)
@@ -66,7 +136,27 @@ def screen_undervalued_dividend_stocks(
         screened["dividend_decrease_count"].fillna(0).astype("int64")
     )
 
+    # Calculate metrics
     screened["roe"] = _safe_ratio(screened["net_income"], screened["total_equity"]) * 100
+    
+    # Calculate current ratio explicitly from assets and liabilities (as current_ratio may be NaN in source)
+    calculated_current_ratio = _safe_ratio(screened["current_assets"], screened["current_liabilities"]) * 100
+    screened["current_ratio"] = screened["current_ratio"].fillna(calculated_current_ratio)
+    
+    # Calculate growth metrics
+    screened["revenue_growth"] = _safe_ratio(
+        screened["revenue"] - screened["prev_revenue"],
+        screened["prev_revenue"]
+    ) * 100
+    screened["operating_income_growth"] = _safe_ratio(
+        screened["operating_income"] - screened["prev_operating_income"],
+        screened["prev_operating_income"]
+    ) * 100
+    screened["eps_growth"] = _safe_ratio(
+        screened["eps"] - screened["prev_eps"],
+        screened["prev_eps"]
+    ) * 100
+
     screened["per"] = _safe_ratio(screened["market_cap"], screened["net_income"])
     screened["pbr"] = _safe_ratio(screened["market_cap"], screened["total_equity"])
     screened["dividend_yield"] = screened["cash_dividend_yield"]
@@ -83,8 +173,13 @@ def screen_undervalued_dividend_stocks(
         errors="coerce",
     )
 
+    # Score applying
     screened["financial_stability_score"] = screened.apply(
         _score_financial_stability,
+        axis=1,
+    )
+    screened["growth_score"] = screened.apply(
+        _score_growth,
         axis=1,
     )
     screened["undervaluation_score"] = screened.apply(_score_undervaluation, axis=1)
@@ -99,10 +194,12 @@ def screen_undervalued_dividend_stocks(
 
     screened["total_score"] = (
         screened["financial_stability_score"]
+        + screened["growth_score"]
         + screened["undervaluation_score"]
         + screened["shareholder_return_score"]
         + screened["market_governance_score"]
     ).round(2)
+    
     screened["is_candidate"] = (
         (screened["total_score"] >= minimum_total_score)
         & (screened["net_income"] > 0)
@@ -244,10 +341,19 @@ def _safe_ratio(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
 
 def _score_financial_stability(row: pd.Series) -> int:
     score = 0
-    score += _range_score(row["roe"], [(15, 12), (10, 9), (5, 6), (0, 3)], 0)
-    score += _inverse_range_score(row["debt_ratio"], [(100, 8), (200, 5), (400, 2)])
+    score += _inverse_range_score(row["debt_ratio"], [(50, 8), (100, 6), (200, 4), (400, 2)])
+    score += _range_score(row["current_ratio"], [(200, 7), (150, 5), (100, 3)], 0)
 
-    return min(score, 20)
+    return min(score, 15)
+
+
+def _score_growth(row: pd.Series) -> int:
+    score = 0
+    score += _range_score(row["revenue_growth"], [(10, 5), (5, 4), (0, 2)], 0)
+    score += _range_score(row["operating_income_growth"], [(15, 5), (5, 4), (0, 2)], 0)
+    score += _range_score(row["eps_growth"], [(15, 5), (5, 4), (0, 2)], 0)
+
+    return min(score, 15)
 
 
 def _score_undervaluation(row: pd.Series) -> int:
@@ -255,7 +361,7 @@ def _score_undervaluation(row: pd.Series) -> int:
     score += _inverse_range_score(row["per"], [(6, 15), (10, 12), (15, 8), (25, 4)])
     score += _inverse_range_score(row["pbr"], [(0.6, 15), (1.0, 12), (1.5, 8), (2.5, 4)])
 
-    return min(score, 30)
+    return min(score, 25)
 
 
 def _score_shareholder_return(row: pd.Series) -> int:
@@ -264,24 +370,11 @@ def _score_shareholder_return(row: pd.Series) -> int:
     score += _range_score(row["dividend_years"], [(3, 15), (2, 10), (1, 5)], 0)
     score -= min(int(row["dividend_decrease_count"]) * 5, 15)
 
-    return max(min(score, 30), 0)
+    return max(min(score, 25), 0)
 
 
 def _score_market_governance(row: pd.Series) -> int:
-    score = 5 if row["market"] == "KOSPI" else 3
-    score += _range_score(
-        row["market_cap"],
-        [(1_000_000_000_000, 5), (300_000_000_000, 4), (100_000_000_000, 2)],
-        1,
-    )
-    score += _range_score(
-        row["trading_value"],
-        [(5_000_000_000, 5), (1_000_000_000, 4), (300_000_000, 2)],
-        1,
-    )
-    score += _range_score(row["listed_years"], [(10, 5), (5, 4), (3, 2)], 1)
-
-    return min(score, 20)
+    return 0
 
 
 def _range_score(value: object, thresholds: list[tuple[float, int]], default: int) -> int:
