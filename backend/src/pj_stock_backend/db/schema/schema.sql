@@ -125,3 +125,56 @@ create table if not exists stock_evaluations (
 
 create index if not exists idx_stock_evaluations_stock_code
 on stock_evaluations (stock_code);
+
+create table if not exists ud_portfolio_status (
+    id integer primary key autoincrement,
+    initial_balance real not null,
+    current_cash real not null,
+    current_valuation real not null,
+    total_asset real not null,
+    mdd real not null default 0.0,
+    total_return real not null default 0.0,
+    win_rate real not null default 0.0,
+    updated_at text not null default current_timestamp
+);
+
+create table if not exists ud_portfolio_holdings (
+    id integer primary key autoincrement,
+    stock_code text not null,
+    stock_name text not null,
+    entry_date text not null,
+    entry_price real not null,
+    quantity integer not null,
+    current_price real not null,
+    valuation real not null,
+    holding_return real not null,
+    score_at_entry real,
+    exit_date text,
+    exit_price real,
+    score_at_exit real,
+    status text not null default 'ACTIVE',
+    updated_at text not null default current_timestamp
+);
+
+create table if not exists ud_portfolio_history (
+    trade_date text primary key,
+    cash real not null,
+    valuation real not null,
+    total_asset real not null,
+    daily_return real not null,
+    drawdown real not null default 0.0,
+    updated_at text not null default current_timestamp
+);
+
+create table if not exists ud_portfolio_transactions (
+    id integer primary key autoincrement,
+    trade_date text not null,
+    stock_code text not null,
+    stock_name text not null,
+    transaction_type text not null, -- 'BUY' or 'SELL'
+    price real not null,
+    quantity integer not null,
+    amount real not null,
+    score real,
+    created_at text not null default current_timestamp
+);

@@ -1409,3 +1409,28 @@
   justify-content: flex-end;
   background-color: var(--bg-tertiary);
 }
+
+/* Virtual Portfolio Dashboard Styles */
+.val-positive {
+  color: #10b981 !important;
+}
+
+.val-negative {
+  color: #ef4444 !important;
+}
+
+/* Custom SVG chart animation for portfolio */
+.chart-svg polyline {
+  stroke-dasharray: 2000;
+  stroke-dashoffset: 0;
+  animation: drawLine 1.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes drawLine {
+  from {
+    stroke-dashoffset: 2000;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}

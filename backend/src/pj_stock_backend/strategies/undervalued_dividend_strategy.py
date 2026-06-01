@@ -127,7 +127,7 @@ def screen_undervalued_dividend_stocks(
         .merge(dividend_years, on="corp_code", how="left")
         .merge(dividend_decrease_counts, on="corp_code", how="left")
         .merge(daily_prices, on="stock_code", how="inner", suffixes=("", "_price"))
-        .merge(stocks[["stock_code", "listed_date"]], on="stock_code", how="left")
+        .merge(stocks[["stock_code", "listed_date", "sector"]], on="stock_code", how="left")
     )
 
     screened["stock_name"] = screened["stock_name"].fillna(screened["corp_name"])
@@ -339,7 +339,47 @@ def _safe_ratio(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
     return ratio.where(denominator.notna() & (denominator > 0))
 
 
+def _is_financial_sector(row: pd.Series) -> bool:
+    # 1. Check sector column
+    sector = row.get("sector")
+    if not pd.isna(sector):
+        s = str(sector)
+        if not any(ex in s for ex in ["생명과학", "생명공학", "생명자원"]):
+            for kw in ["금융", "은행", "보험", "증권", "카드"]:
+                if kw in s:
+                    return True
+
+    # 2. Check stock_name / corp_name for financial keywords
+    name = row.get("stock_name") or row.get("corp_name") or ""
+    if name:
+        name_str = str(name)
+        if not any(ex in name_str for ex in ["생명과학", "생명공학", "생명자원"]):
+            for kw in ["금융지주", "금융", "은행", "생명", "화재", "손해보험", "증권", "카드", "캐피탈"]:
+                if kw in name_str:
+                    return True
+
+    # 3. Check accounting characteristics of financial institutions:
+    # They have no distinction of current assets/liabilities, resulting in NaN/None current_ratio,
+    # and have high debt ratios (typically > 300) due to customer deposits.
+    current_ratio = row.get("current_ratio")
+    debt_ratio = row.get("debt_ratio")
+
+    is_current_ratio_na = pd.isna(current_ratio) or current_ratio is None or float(current_ratio) <= 0
+    if is_current_ratio_na and not pd.isna(debt_ratio) and debt_ratio is not None:
+        try:
+            if float(debt_ratio) > 300.0:
+                return True
+        except (ValueError, TypeError):
+            pass
+
+    return False
+
+
 def _score_financial_stability(row: pd.Series) -> int:
+    # 금융회사는 자본적정성 평가를 달리하므로 안정성 점수에서 불이익을 받지 않도록 고정 12점 부여
+    if _is_financial_sector(row):
+        return 12
+
     score = 0
     score += _inverse_range_score(row["debt_ratio"], [(50, 8), (100, 6), (200, 4), (400, 2)])
     score += _range_score(row["current_ratio"], [(200, 7), (150, 5), (100, 3)], 0)

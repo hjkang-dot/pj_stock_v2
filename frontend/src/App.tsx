@@ -76,6 +76,63 @@ interface StockEvaluationItem {
 
 
 
+interface PortfolioSummary {
+  initial_balance: number;
+  current_cash: number;
+  current_valuation: number;
+  total_asset: number;
+  mdd: number;
+  total_return: number;
+  win_rate: number;
+  updated_at: string;
+}
+
+interface PortfolioHolding {
+  id?: number;
+  stock_code: string;
+  stock_name: string;
+  entry_date: string;
+  entry_price: number;
+  quantity: number;
+  current_price: number;
+  valuation: number;
+  holding_return: number;
+  score_at_entry: number | null;
+  exit_date: string | null;
+  exit_price: number | null;
+  score_at_exit: number | null;
+  status: string;
+}
+
+interface HoldingChartPoint {
+  trade_date: string;
+  close_price: number;
+  return_rate: number;
+}
+
+interface PortfolioHistory {
+  trade_date: string;
+  cash: number;
+  valuation: number;
+  total_asset: number;
+  daily_return: number;
+  drawdown: number;
+}
+
+interface PortfolioTransaction {
+  id: number;
+  trade_date: string;
+  stock_code: string;
+  stock_name: string;
+  transaction_type: string;
+  price: number;
+  quantity: number;
+  amount: number;
+  score: number | null;
+  created_at: string;
+}
+
+
 interface DailyPriceItem {
   trade_date: string;
   stock_code: string;
@@ -470,7 +527,24 @@ function App() {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
 
   // Tab State
-  const [activeTab, setActiveTab] = useState<'list' | 'dividend'>('list');
+  const [activeTab, setActiveTab] = useState<'list' | 'dividend' | 'portfolio'>('list');
+
+  // Portfolio states
+  const [portfolioSummary, setPortfolioSummary] = useState<PortfolioSummary | null>(null);
+  const [portfolioHoldings, setPortfolioHoldings] = useState<PortfolioHolding[]>([]);
+  const [portfolioHistory, setPortfolioHistory] = useState<PortfolioHistory[]>([]);
+  const [portfolioTransactions, setPortfolioTransactions] = useState<PortfolioTransaction[]>([]);
+  const [loadingPortfolio, setLoadingPortfolio] = useState(false);
+  const [errorPortfolio, setErrorPortfolio] = useState<string | null>(null);
+  const [initialBalanceInput, setInitialBalanceInput] = useState('100,000,000');
+  const [initializingPortfolio, setInitializingPortfolio] = useState(false);
+  const [updatingPortfolio, setUpdatingPortfolio] = useState(false);
+
+  // Selected holding trade detail state
+  const [selectedHolding, setSelectedHolding] = useState<PortfolioHolding | null>(null);
+  const [holdingChartData, setHoldingChartData] = useState<HoldingChartPoint[]>([]);
+  const [loadingHoldingChart, setLoadingHoldingChart] = useState(false);
+  const [errorHoldingChart, setErrorHoldingChart] = useState<string | null>(null);
 
   // Dividend rankings state
   const [rankedStocks, setRankedStocks] = useState<EvaluatedStockItem[]>([]);
@@ -764,6 +838,103 @@ function App() {
     }
   };
 
+  const fetchPortfolioData = async () => {
+    setLoadingPortfolio(true);
+    setErrorPortfolio(null);
+    try {
+      const sumRes = await fetch('/api/portfolio/summary');
+      if (sumRes.status === 404) {
+        setPortfolioSummary(null);
+        setLoadingPortfolio(false);
+        return;
+      }
+      if (!sumRes.ok) throw new Error();
+      const sumData = await sumRes.json();
+      setPortfolioSummary(sumData);
+
+      const holdRes = await fetch('/api/portfolio/holdings');
+      if (holdRes.ok) setPortfolioHoldings(await holdRes.json());
+
+      const histRes = await fetch('/api/portfolio/history');
+      if (histRes.ok) setPortfolioHistory(await histRes.json());
+
+      const txRes = await fetch('/api/portfolio/transactions?limit=50');
+      if (txRes.ok) setPortfolioTransactions(await txRes.json());
+    } catch (err) {
+      console.warn("Portfolio fetch failed: ", err);
+      setErrorPortfolio("가상 투자 데이터를 불러오는 데 실패했습니다. 서버 상태를 확인해 주세요.");
+    } finally {
+      setLoadingPortfolio(false);
+    }
+  };
+
+  const fetchHoldingChart = async (holdingId?: number) => {
+    if (!holdingId) return;
+    setLoadingHoldingChart(true);
+    setErrorHoldingChart(null);
+    try {
+      const res = await fetch(`/api/portfolio/holding/${holdingId}/chart`);
+      if (res.ok) {
+        const data = await res.json();
+        setHoldingChartData(data);
+      } else {
+        setErrorHoldingChart("수익률 차트 데이터를 가져오는데 실패했습니다.");
+      }
+    } catch (err) {
+      console.error(err);
+      setErrorHoldingChart("수익률 차트를 불러오는 도중 오류가 발생했습니다.");
+    } finally {
+      setLoadingHoldingChart(false);
+    }
+  };
+
+  const handleInitializePortfolio = async () => {
+    const balance = Number(initialBalanceInput.replace(/,/g, ''));
+    if (isNaN(balance) || balance <= 0) {
+      alert("올바른 초기 자금을 입력해 주세요.");
+      return;
+    }
+    const confirmed = window.confirm(`가상 포트폴리오를 초기 자금 ${balance.toLocaleString()}원으로 초기화하고 최신일 기준으로 첫 매수(70점 이상 종목)를 진행하시겠습니까?\n기존 기록은 모두 삭제됩니다.`);
+    if (!confirmed) return;
+
+    setInitializingPortfolio(true);
+    try {
+      const res = await fetch('/api/portfolio/initialize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initial_balance: balance })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "초기화 실패");
+      alert(data.message || "성공적으로 초기화되었습니다.");
+      fetchPortfolioData();
+    } catch (err: any) {
+      alert(`가상 포트폴리오 초기화 실패: ${err.message || err}`);
+    } finally {
+      setInitializingPortfolio(false);
+    }
+  };
+
+  const handleUpdatePortfolio = async () => {
+    setUpdatingPortfolio(true);
+    try {
+      const res = await fetch('/api/portfolio/update', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "업데이트 실패");
+      
+      if (data.processed_days > 0) {
+        alert(`포트폴리오 업데이트 완료!\n\n• ${data.processed_days}일치의 신규 가격 및 스코어를 적용하여 거래와 자산 상태를 전진 갱신했습니다.`);
+      } else {
+        alert("이미 가상 포트폴리오가 최신 데이터 상태입니다.");
+      }
+      fetchPortfolioData();
+    } catch (err: any) {
+      alert(`포트폴리오 업데이트 실패: ${err.message || err}`);
+    } finally {
+      setUpdatingPortfolio(false);
+    }
+  };
+
   useEffect(() => {
     fetchStocks();
   }, [page, market]);
@@ -777,6 +948,12 @@ function App() {
   useEffect(() => {
     if (activeTab === 'dividend') {
       fetchRankingsSummary();
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'portfolio') {
+      fetchPortfolioData();
     }
   }, [activeTab]);
 
@@ -878,15 +1055,31 @@ function App() {
     fetchRankedStocks();
   };
 
-  const handleTabChange = (tab: 'list' | 'dividend') => {
+  const handleTabChange = (tab: 'list' | 'dividend' | 'portfolio') => {
     setSelectedStock(null);
+    setSelectedHolding(null);
     setActiveTab(tab);
   };
 
   const handleStockClick = (stock: StockItem) => {
     setSelectedStock(stock);
+    setSelectedHolding(null);
     fetchFinancials(stock.stock_code);
     fetchEvaluation(stock.stock_code);
+  };
+
+  const handleHoldingClick = (holding: PortfolioHolding) => {
+    const dummyStock: StockItem = {
+      stock_code: holding.stock_code,
+      stock_name: holding.stock_name,
+      market: 'KOSPI',
+      is_active: 1
+    };
+    setSelectedStock(dummyStock);
+    setSelectedHolding(holding);
+    fetchFinancials(holding.stock_code);
+    fetchEvaluation(holding.stock_code);
+    fetchHoldingChart(holding.id);
   };
 
   // Render Detailed Financial Page
@@ -919,9 +1112,12 @@ function App() {
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
                 배당주 분석
               </li>
-              <li className="nav-item">
+              <li 
+                className={`nav-item ${activeTab === 'portfolio' ? 'active' : ''}`}
+                onClick={() => handleTabChange('portfolio')}
+              >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                가상 테스트 (준비중)
+                가상 투자
               </li>
               <li>
                 <button
@@ -941,7 +1137,7 @@ function App() {
         {/* Main Content */}
         <main className="main-content">
           <div>
-            <button className="back-btn" onClick={() => setSelectedStock(null)}>
+            <button className="back-btn" onClick={() => { setSelectedStock(null); setSelectedHolding(null); }}>
               ← 목록으로 돌아가기
             </button>
           </div>
@@ -953,10 +1149,192 @@ function App() {
               <span className="badge">종목코드: {selectedStock.stock_code}</span>
               {selectedStock.dart_corp_code && <span className="badge">DART 기업코드: {selectedStock.dart_corp_code}</span>}
               {evaluation?.is_candidate === 1 && <span className="badge primary">🌟 배당 우수 추천 종목</span>}
+              {selectedHolding && <span className="badge warning" style={{ backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>📈 가상 투자 거래 분석</span>}
             </div>
-            <h1>{selectedStock.stock_name} 상세 재무 분석</h1>
-            <p>선택된 상장 기업의 연도별 연결 재무실적 및 주당 배당금 추이 현황을 조회합니다.</p>
+            <h1>
+              {selectedStock.stock_name} {selectedHolding ? "가상 투자 매매일지 및 상세 분석" : "상세 재무 분석"}
+            </h1>
+            <p>
+              {selectedHolding 
+                ? "해당 종목의 가상 투자 거래 성과(수익률 추이 및 보유 정보)와 연도별 재무 실적을 통합 분석합니다."
+                : "선택된 상장 기업의 연도별 연결 재무실적 및 주당 배당금 추이 현황을 조회합니다."}
+            </p>
           </header>
+
+          {selectedHolding && (
+            <section className="trade-log-section" style={{ marginBottom: '2rem' }}>
+              <h2 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                📝 가상 투자 매매일지 (Trading Log)
+              </h2>
+              
+              <div className="summary-grid" style={{ marginBottom: '1.5rem' }}>
+                <div className="summary-card" style={{ borderLeft: '4px solid var(--color-primary)' }}>
+                  <span className="card-title">현재 상태</span>
+                  <span className="card-value" style={{ 
+                    color: selectedHolding.status === 'ACTIVE' ? 'var(--color-primary)' : '#6b7280',
+                    fontSize: '1.4rem',
+                    fontWeight: 800
+                  }}>
+                    {selectedHolding.status === 'ACTIVE' ? '🟢 보유 중' : '🔴 청산 완료'}
+                  </span>
+                </div>
+                <div className="summary-card">
+                  <span className="card-title">진입 정보</span>
+                  <span className="card-value" style={{ fontSize: '1.3rem' }}>
+                    {selectedHolding.entry_price.toLocaleString()}원
+                  </span>
+                  <span className="card-desc" style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', marginTop: '0.25rem' }}>
+                    진입일: {selectedHolding.entry_date} | 점수: {selectedHolding.score_at_entry ? `${Math.round(selectedHolding.score_at_entry)}점` : '-'}
+                  </span>
+                </div>
+                <div className="summary-card">
+                  <span className="card-title">{selectedHolding.status === 'ACTIVE' ? '현재가 정보' : '청산 정보'}</span>
+                  <span className="card-value" style={{ fontSize: '1.3rem' }}>
+                    {selectedHolding.status === 'ACTIVE' ? selectedHolding.current_price.toLocaleString() : (selectedHolding.exit_price?.toLocaleString() || '-')}원
+                  </span>
+                  <span className="card-desc" style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', marginTop: '0.25rem' }}>
+                    {selectedHolding.status === 'ACTIVE' 
+                      ? `업데이트: ${selectedHolding.updated_at.split(' ')[0]}` 
+                      : `청산일: ${selectedHolding.exit_date} | 점수: ${selectedHolding.score_at_exit ? `${Math.round(selectedHolding.score_at_exit)}점` : '-'}`}
+                  </span>
+                </div>
+                <div className="summary-card">
+                  <span className="card-title">개별 거래 수익률</span>
+                  <span className={`card-value ${selectedHolding.holding_return >= 0 ? 'color-up' : 'color-down'}`} style={{ fontSize: '1.6rem', fontWeight: 800 }}>
+                    {selectedHolding.holding_return >= 0 ? `+${selectedHolding.holding_return.toFixed(2)}%` : `${selectedHolding.holding_return.toFixed(2)}%`}
+                  </span>
+                </div>
+                <div className="summary-card">
+                  <span className="card-title">보유 기간</span>
+                  <span className="card-value" style={{ fontSize: '1.3rem', color: 'var(--text-primary)' }}>
+                    {(() => {
+                      const parseDate = (dStr: string) => {
+                        if (!dStr || dStr.length !== 8) return new Date();
+                        return new Date(Number(dStr.slice(0,4)), Number(dStr.slice(4,6)) - 1, Number(dStr.slice(6,8)));
+                      };
+                      const start = parseDate(selectedHolding.entry_date);
+                      const end = selectedHolding.status === 'ACTIVE' 
+                        ? (portfolioSummary?.updated_at ? parseDate(portfolioSummary.updated_at.replace(/-/g, '').split(' ')[0]) : new Date())
+                        : parseDate(selectedHolding.exit_date || '');
+                      const diffTime = Math.abs(end.getTime() - start.getTime());
+                      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+                      return `${diffDays}일`;
+                    })()}
+                  </span>
+                </div>
+              </div>
+
+              <div className="chart-card" style={{ padding: '1.5rem', marginBottom: '2rem' }}>
+                <h4 style={{ margin: '0 0 1rem 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>📈 보유 기간 누적 수익률 추이</span>
+                  {selectedHolding.status === 'ACTIVE' && (
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 'normal' }}>
+                      (진입일 {selectedHolding.entry_date} ~ 현재)
+                    </span>
+                  )}
+                  {selectedHolding.status === 'CLOSED' && (
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 'normal' }}>
+                      (진입일 {selectedHolding.entry_date} ~ 청산일 {selectedHolding.exit_date})
+                    </span>
+                  )}
+                </h4>
+
+                {loadingHoldingChart ? (
+                  <div className="loading-wrapper" style={{ height: '220px', minHeight: 'auto' }}>
+                    <div className="spinner"></div>
+                    <p style={{ fontSize: '0.85rem' }}>수익률 차트 데이터를 불러오는 중...</p>
+                  </div>
+                ) : errorHoldingChart ? (
+                  <div className="error-card" style={{ height: '220px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+                    <p style={{ fontSize: '0.85rem', color: 'var(--color-danger)' }}>{errorHoldingChart}</p>
+                  </div>
+                ) : holdingChartData.length === 0 ? (
+                  <div className="empty-wrapper" style={{ height: '220px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                    <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>차트 데이터가 없습니다.</p>
+                  </div>
+                ) : (
+                  <div className="chart-svg-container" style={{ height: '220px' }}>
+                    {(() => {
+                      const svgW = 1000;
+                      const svgH = 220;
+                      const padTop = 15;
+                      const padBottom = 25;
+                      const padLeft = 60;
+                      const padRight = 30;
+                      const cW = svgW - padLeft - padRight;
+                      const cH = svgH - padTop - padBottom;
+
+                      const rets = holdingChartData.map(d => d.return_rate);
+                      const maxR = Math.max(...rets);
+                      const minR = Math.min(...rets);
+                      const rRange = maxR - minR;
+                      const rPad = rRange * 0.15 || 2.0;
+
+                      const yM = maxR + rPad;
+                      const yMinVal = Math.min(0, minR - rPad);
+
+                      const getCY = (v: number) => padTop + cH - ((v - yMinVal) / (yM - yMinVal || 1)) * cH;
+                      const getCX = (i: number) => padLeft + (i / (holdingChartData.length - 1 || 1)) * cW;
+
+                      const pts = holdingChartData.map((d, i) => `${getCX(i)},${getCY(d.return_rate)}`).join(' ');
+
+                      return (
+                        <svg viewBox={`0 0 ${svgW} ${svgH}`} className="chart-svg" style={{ height: '100%' }}>
+                          {[yMinVal, yMinVal + (yM - yMinVal)/2, yM].map((v, idx) => {
+                            const y = getCY(v);
+                            return (
+                              <g key={`hl-${idx}`}>
+                                <line x1={padLeft} y1={y} x2={svgW - padRight} y2={y} stroke="#e5e7eb" strokeWidth="0.8" strokeDasharray="3,3" />
+                                <text x={padLeft - 10} y={y + 4} textAnchor="end" fontSize="10" fill="#64748b" fontWeight="500">
+                                  {v >= 0 ? '+' : ''}{v.toFixed(1)}%
+                                </text>
+                              </g>
+                            );
+                          })}
+
+                          {yMinVal < 0 && yM > 0 && (
+                            <line x1={padLeft} y1={getCY(0)} x2={svgW - padRight} y2={getCY(0)} stroke="#f43f5e" strokeWidth="1" strokeDasharray="2,2" />
+                          )}
+
+                          {holdingChartData.map((d, i) => {
+                            if (holdingChartData.length > 8 && i % Math.max(1, Math.floor(holdingChartData.length / 6)) !== 0 && i !== holdingChartData.length - 1) return null;
+                            const x = getCX(i);
+                            const formatDateStr = (s: string) => s.length === 8 ? `${s.slice(4,6)}/${s.slice(6,8)}` : s;
+                            return (
+                              <g key={`ht-${i}`}>
+                                <line x1={x} y1={padTop + cH} x2={x} y2={padTop + cH + 4} stroke="#cbd5e1" strokeWidth="1" />
+                                <text x={x} y={padTop + cH + 15} textAnchor="middle" fontSize="10" fill="#64748b" fontWeight="500">
+                                  {formatDateStr(d.trade_date)}
+                                </text>
+                              </g>
+                            );
+                          })}
+
+                          <polyline fill="none" stroke="var(--color-primary)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" points={pts} />
+
+                          {holdingChartData.map((d, i) => {
+                            if (holdingChartData.length > 30 && i !== 0 && i !== holdingChartData.length - 1) return null;
+                            const x = getCX(i);
+                            const y = getCY(d.return_rate);
+                            return (
+                              <g key={`hdot-${i}`}>
+                                <circle cx={x} cy={y} r="4" fill="#ffffff" stroke="var(--color-primary)" strokeWidth="2" />
+                                {i === holdingChartData.length - 1 && (
+                                  <text x={x + 8} y={y - 4} fontSize="10" fontWeight="bold" fill="var(--color-primary)">
+                                    {d.return_rate >= 0 ? '+' : ''}{d.return_rate.toFixed(2)}%
+                                  </text>
+                                )}
+                              </g>
+                            );
+                          })}
+                        </svg>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
 
           {/* Evaluation Section */}
           {loadingEvaluation ? (
@@ -1278,9 +1656,12 @@ function App() {
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
               배당주 분석
             </li>
-            <li className="nav-item">
+            <li 
+              className={`nav-item ${activeTab === 'portfolio' ? 'active' : ''}`}
+              onClick={() => handleTabChange('portfolio')}
+            >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-              가상 테스트 (준비중)
+              가상 투자
             </li>
             <li>
               <button
@@ -1299,7 +1680,7 @@ function App() {
 
       {/* Main Content */}
       <main className="main-content">
-        {activeTab === 'list' ? (
+        {activeTab === 'list' && (
           <>
             <header className="header-section">
               <div className="header-title">
@@ -1538,7 +1919,9 @@ function App() {
               )}
             </section>
           </>
-        ) : (
+        )}
+
+        {activeTab === 'dividend' && (
           <>
             <header className="header-section">
               <div className="header-title">
@@ -1799,6 +2182,253 @@ function App() {
                 </>
               )}
             </section>
+          </>
+        )}
+
+        {activeTab === 'portfolio' && (
+          <>
+            <header className="header-section">
+              <div className="header-title">
+                <h1>가상 투자 시뮬레이션 (저평가 배당주 전략)</h1>
+                <p>배당주 분석 점수 70점 이상인 종목에 진입하여 보유하고, 60점 미만으로 하락 시 매도하는 전략의 가상 포트폴리오를 운용합니다.</p>
+              </div>
+            </header>
+
+            {loadingPortfolio ? (
+              <div className="loading-wrapper" style={{ minHeight: '300px' }}>
+                <div className="spinner"></div>
+                <p>가상 투자 데이터를 불러오는 중입니다...</p>
+              </div>
+            ) : errorPortfolio ? (
+              <div className="error-card" style={{ margin: '2rem auto', maxWidth: '450px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--color-danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                <p style={{ fontWeight: 600, color: 'var(--text-primary)', marginTop: '0.75rem', marginBottom: '0.75rem' }}>{errorPortfolio}</p>
+                <button className="back-btn" style={{ padding: '0.4rem 1.2rem', fontSize: '0.85rem' }} onClick={fetchPortfolioData}>
+                  다시 시도
+                </button>
+              </div>
+            ) : portfolioSummary === null ? (
+              <div className="controls-card" style={{ padding: '3rem', textAlign: 'center', maxWidth: '600px', margin: '2rem auto' }}>
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: '1.5rem' }}><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+                <h3 style={{ marginBottom: '1rem', color: 'var(--text-primary)' }}>가상 투자 포트폴리오를 시작해보세요</h3>
+                <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem', fontSize: '0.95rem', lineHeight: '1.6' }}>
+                  초기 자금을 설정하고 아래 버튼을 클릭하면, 가장 최신의 데이터 기준으로 70점 이상인 종목에 분산 투자를 최초 진입하여 가상 운용을 기동합니다.
+                </p>
+                <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', alignItems: 'center' }}>
+                  <div style={{ position: 'relative', width: '220px' }}>
+                    <input
+                      type="text"
+                      className="search-input"
+                      style={{ paddingLeft: '1rem', fontSize: '1.05rem', fontWeight: 600, textAlign: 'right', paddingRight: '2.5rem' }}
+                      value={initialBalanceInput}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/[^0-9]/g, '');
+                        setInitialBalanceInput(val ? Number(val).toLocaleString() : '');
+                      }}
+                    />
+                    <span style={{ position: 'absolute', right: '1rem', top: '50%', transform: 'translateY(-50%)', fontWeight: 600, color: 'var(--text-secondary)' }}>원</span>
+                  </div>
+                  <button 
+                    className="sync-btn evaluate-btn" 
+                    style={{ padding: '0.75rem 2rem', fontSize: '0.95rem', background: 'linear-gradient(135deg, var(--color-primary), #4f46e5)' }}
+                    onClick={handleInitializePortfolio}
+                    disabled={initializingPortfolio}
+                  >
+                    {initializingPortfolio ? "포트폴리오 생성 중..." : "가상 투자 시작하기"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* 1. 요약 카드 위젯 */}
+                <section className="summary-grid">
+                  <div className="summary-card">
+                    <span className="card-title">모의지수 자산액</span>
+                    <span className="card-value" style={{ color: 'var(--text-primary)' }}>{formatWon(portfolioSummary.total_asset)}</span>
+                  </div>
+                  <div className="summary-card">
+                    <span className="card-title">진행 중인 종목 수</span>
+                    <span className="card-value" style={{ color: 'var(--text-secondary)' }}>
+                      {portfolioHoldings.filter(h => h.status === 'ACTIVE').length}개
+                    </span>
+                  </div>
+                  <div className="summary-card">
+                    <span className="card-title">지수 누적 수익률</span>
+                    <span className={`card-value ${portfolioSummary.total_return >= 0 ? 'color-up' : 'color-down'}`}>
+                      {portfolioSummary.total_return >= 0 ? `+${portfolioSummary.total_return.toFixed(2)}%` : `${portfolioSummary.total_return.toFixed(2)}%`}
+                    </span>
+                  </div>
+                  <div className="summary-card">
+                    <span className="card-title">최대 낙폭 (MDD)</span>
+                    <span className="card-value" style={{ color: 'var(--color-danger)' }}>-{portfolioSummary.mdd.toFixed(2)}%</span>
+                  </div>
+                  <div className="summary-card">
+                    <span className="card-title">완료 거래 승률</span>
+                    <span className="card-value" style={{ color: '#059669' }}>{portfolioSummary.win_rate.toFixed(1)}%</span>
+                  </div>
+                </section>
+
+                {/* 2. 제어 컨트롤러 */}
+                <section className="controls-card" style={{ padding: '1.25rem 2rem', marginBottom: '1.5rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                      최종 업데이트 시점: <strong>{portfolioSummary.updated_at}</strong>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                      <button 
+                        className={`sync-btn financial-sync-btn ${updatingPortfolio ? 'loading' : ''}`}
+                        style={{ padding: '0.5rem 1.25rem', fontSize: '0.9rem', display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
+                        onClick={handleUpdatePortfolio}
+                        disabled={updatingPortfolio || initializingPortfolio}
+                      >
+                        <svg className="sync-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                        {updatingPortfolio ? "포트폴리오 업데이트 중..." : "오늘 포트폴리오 업데이트"}
+                      </button>
+                      <button 
+                        className="reset-db-btn"
+                        style={{ padding: '0.5rem 1.25rem', fontSize: '0.9rem', width: 'auto', margin: 0 }}
+                        onClick={handleInitializePortfolio}
+                        disabled={initializingPortfolio || updatingPortfolio}
+                      >
+                        초기화 및 재설정
+                      </button>
+                    </div>
+                  </div>
+                </section>
+
+                {/* 3. 자산 성장 추이 차트 */}
+                <PortfolioChart history={portfolioHistory} />
+
+                <div className="detail-section" style={{ marginTop: '1.5rem' }}>
+                  {/* 4. 현재 보유 종목 리스트 */}
+                  <div>
+                    <h3 className="section-title">💼 가상 투자 종목 기록 및 수익률 현황 (수익률 순)</h3>
+                    <div className="financials-table-wrapper">
+                      <table className="stock-table">
+                        <thead>
+                          <tr>
+                            <th>종목코드</th>
+                            <th>종목명</th>
+                            <th>진입일자</th>
+                            <th>청산일자</th>
+                            <th className="number-align">진입가격 (원)</th>
+                            <th className="number-align">현재/청산가격 (원)</th>
+                            <th className="number-align">수익률</th>
+                            <th style={{ textAlign: 'center' }}>진입 점수</th>
+                            <th style={{ textAlign: 'center' }}>청산 점수</th>
+                            <th style={{ textAlign: 'center' }}>상태</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {portfolioHoldings.length === 0 ? (
+                            <tr>
+                              <td colSpan={10} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
+                                가상 투자 종목 기록이 없습니다.
+                              </td>
+                            </tr>
+                          ) : (
+                            portfolioHoldings.map((hold, idx) => {
+                              const isActive = hold.status === 'ACTIVE';
+                              return (
+                                <tr 
+                                  key={`${hold.stock_code}-${hold.entry_date}-${idx}`}
+                                  className="clickable-row"
+                                  onClick={() => handleHoldingClick(hold)}
+                                  style={{ 
+                                    backgroundColor: isActive ? 'inherit' : 'rgba(243, 244, 246, 0.4)', 
+                                    opacity: isActive ? 1 : 0.85 
+                                  }}
+                                >
+                                  <td style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--color-primary)' }}>{hold.stock_code}</td>
+                                  <td style={{ fontWeight: 600 }}>{hold.stock_name}</td>
+                                  <td style={{ fontFamily: 'monospace' }}>{hold.entry_date}</td>
+                                  <td style={{ fontFamily: 'monospace' }}>{hold.exit_date || '-'}</td>
+                                  <td className="number-align" style={{ fontVariantNumeric: 'tabular-nums' }}>{hold.entry_price.toLocaleString()}</td>
+                                  <td className="number-align" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                    {isActive ? hold.current_price.toLocaleString() : (hold.exit_price?.toLocaleString() || '-')}
+                                  </td>
+                                  <td className={`number-align ${hold.holding_return >= 0 ? 'color-up' : 'color-down'}`} style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
+                                    {hold.holding_return >= 0 ? `+${hold.holding_return.toFixed(2)}%` : `${hold.holding_return.toFixed(2)}%`}
+                                  </td>
+                                  <td style={{ textAlign: 'center', fontWeight: 600, color: '#10b981' }}>{hold.score_at_entry ? `${Math.round(hold.score_at_entry)}점` : '-'}</td>
+                                  <td style={{ textAlign: 'center', fontWeight: 600, color: hold.score_at_exit ? '#ef4444' : 'var(--text-secondary)' }}>{hold.score_at_exit ? `${Math.round(hold.score_at_exit)}점` : '-'}</td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    <span style={{ 
+                                      fontSize: '0.75rem', 
+                                      backgroundColor: isActive ? 'var(--color-primary-light)' : '#e5e7eb', 
+                                      color: isActive ? 'var(--color-primary)' : '#4b5563', 
+                                      padding: '0.2rem 0.5rem', 
+                                      borderRadius: '4px', 
+                                      fontWeight: 'bold' 
+                                    }}>
+                                      {isActive ? '보유중' : '청산완료'}
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* 5. 거래 체결 내역 */}
+                  <div>
+                    <h3 className="section-title">📜 최근 거래 및 체결 이력</h3>
+                    <div className="financials-table-wrapper">
+                      <table className="stock-table">
+                        <thead>
+                          <tr>
+                            <th>체결시간</th>
+                            <th>종목코드</th>
+                            <th>종목명</th>
+                            <th style={{ textAlign: 'center' }}>구분</th>
+                            <th className="number-align">체결단가 (원)</th>
+                            <th className="number-align">체결수량 (주)</th>
+                            <th className="number-align">체결금액 (원)</th>
+                            <th style={{ textAlign: 'center' }}>체결 시 점수</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {portfolioTransactions.length === 0 ? (
+                            <tr>
+                              <td colSpan={8} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
+                                체결된 가상 투자 거래 내역이 존재하지 않습니다.
+                              </td>
+                            </tr>
+                          ) : (
+                            portfolioTransactions.map((tx) => (
+                              <tr key={tx.id}>
+                                <td style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{tx.created_at}</td>
+                                <td style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--color-primary)' }}>{tx.stock_code}</td>
+                                <td style={{ fontWeight: 600 }}>{tx.stock_name}</td>
+                                <td style={{ textAlign: 'center' }}>
+                                  <span style={{ 
+                                    fontSize: '0.75rem', 
+                                    backgroundColor: tx.transaction_type === 'BUY' ? 'rgba(225, 29, 72, 0.1)' : 'rgba(37, 99, 235, 0.1)', 
+                                    color: tx.transaction_type === 'BUY' ? 'var(--color-primary)' : 'var(--color-primary-dark)',
+                                    padding: '0.2rem 0.5rem', 
+                                    borderRadius: '4px', 
+                                    fontWeight: 'bold' 
+                                  }}>
+                                    {tx.transaction_type === 'BUY' ? '매수' : '매도'}
+                                  </span>
+                                </td>
+                                <td className="number-align" style={{ fontVariantNumeric: 'tabular-nums' }}>{tx.price.toLocaleString()}</td>
+                                <td className="number-align" style={{ fontVariantNumeric: 'tabular-nums' }}>{tx.quantity.toLocaleString()}</td>
+                                <td className="number-align" style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 500 }}>{tx.amount.toLocaleString()}</td>
+                                <td style={{ textAlign: 'center', color: 'var(--text-secondary)', fontWeight: 500 }}>{tx.score ? `${Math.round(tx.score)}점` : '-'}</td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
           </>
         )}
       </main>
@@ -2066,6 +2696,131 @@ function ScoreDetailsOverlay({ evaluation, onClose }: ScoreDetailsOverlayProps) 
             확인 및 닫기
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------
+// 📈 PortfolioChart Component (SVG Asset & Return History Line Chart)
+// ----------------------------------------------------
+interface PortfolioChartProps {
+  history: PortfolioHistory[];
+}
+
+function PortfolioChart({ history }: PortfolioChartProps) {
+  const [chartType, setChartType] = useState<'return' | 'asset'>('return');
+
+  if (history.length === 0) {
+    return (
+      <div className="chart-card empty-card" style={{ height: '300px' }}>
+        <p>자산 추이 이력 데이터가 존재하지 않습니다. 초기화를 먼저 실행해 주세요.</p>
+      </div>
+    );
+  }
+
+  const svgWidth = 1000;
+  const svgHeight = 300;
+  const margin = { top: 25, right: 60, bottom: 40, left: 75 };
+  const chartWidth = svgWidth - margin.left - margin.right;
+  const chartHeight = svgHeight - margin.top - margin.bottom;
+
+  const values = chartType === 'return' ? history.map(h => h.daily_return) : history.map(h => h.total_asset);
+  
+  const maxValue = Math.max(...values);
+  const minValue = Math.min(...values);
+  const range = maxValue - minValue;
+  const pad = range * 0.1 || (chartType === 'return' ? 1 : 1000000);
+  
+  const yMax = maxValue + pad;
+  const yMin = chartType === 'return' ? Math.min(0, minValue - pad) : Math.max(0, minValue - pad);
+
+  const getY = (val: number) => margin.top + chartHeight - ((val - yMin) / (yMax - yMin || 1)) * chartHeight;
+  const getX = (idx: number) => margin.left + (idx / (history.length - 1 || 1)) * chartWidth;
+
+  const points = history.map((h, idx) => `${getX(idx)},${getY(chartType === 'return' ? h.daily_return : h.total_asset)}`).join(' ');
+
+  const formatChartDate = (dateStr: string) => {
+    if (dateStr.length !== 8) return dateStr;
+    return `${dateStr.slice(4, 6)}/${dateStr.slice(6, 8)}`;
+  };
+
+  const getFormattedVal = (val: number) => {
+    if (chartType === 'return') return `${val >= 0 ? '+' : ''}${val.toFixed(2)}%`;
+    return formatWon(val);
+  };
+
+  return (
+    <div className="chart-card" style={{ marginTop: '1.5rem', marginBottom: '1.5rem' }}>
+      <div className="chart-header">
+        <h3>📈 가상 투자 자산 및 누적 수익률 추이</h3>
+        <div className="chart-period-tabs">
+          <button className={`tab-btn ${chartType === 'return' ? 'active' : ''}`} onClick={() => setChartType('return')}>누적 수익률(%)</button>
+          <button className={`tab-btn ${chartType === 'asset' ? 'active' : ''}`} onClick={() => setChartType('asset')}>총 자산액(원)</button>
+        </div>
+      </div>
+
+      <div className="chart-svg-container">
+        <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="chart-svg">
+          {/* Horizontal Grid lines */}
+          {[yMin, yMin + (yMax - yMin) / 2, yMax].map((val, idx) => {
+            const y = getY(val);
+            return (
+              <g key={`y-grid-${idx}`}>
+                <line x1={margin.left} y1={y} x2={svgWidth - margin.right} y2={y} stroke="#e5e7eb" strokeWidth="0.8" strokeDasharray="3,3" />
+                <text x={margin.left - 10} y={y + 4} textAnchor="end" fontSize="11" fill="#64748b" fontWeight="500">
+                  {getFormattedVal(val)}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Zero line for return chart */}
+          {chartType === 'return' && yMin < 0 && yMax > 0 && (
+            <line x1={margin.left} y1={getY(0)} x2={svgWidth - margin.right} y2={getY(0)} stroke="#f43f5e" strokeWidth="1.2" strokeDasharray="2,2" />
+          )}
+
+          {/* Time axis ticks */}
+          {history.map((h, idx) => {
+            if (history.length > 8 && idx % Math.max(1, Math.floor(history.length / 6)) !== 0 && idx !== history.length - 1) return null;
+            const x = getX(idx);
+            return (
+              <g key={`x-tick-${idx}`}>
+                <line x1={x} y1={margin.top + chartHeight} x2={x} y2={margin.top + chartHeight + 5} stroke="#cbd5e1" strokeWidth="1" />
+                <text x={x} y={margin.top + chartHeight + 20} textAnchor="middle" fontSize="11" fill="#64748b" fontWeight="500">
+                  {formatChartDate(h.trade_date)}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* The Line */}
+          <polyline
+            fill="none"
+            stroke={chartType === 'return' ? "var(--color-primary)" : "#10b981"}
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            points={points}
+          />
+
+          {/* Dots on points */}
+          {history.map((h, idx) => {
+            const x = getX(idx);
+            const y = getY(chartType === 'return' ? h.daily_return : h.total_asset);
+            return (
+              <circle
+                key={`p-dot-${idx}`}
+                cx={x}
+                cy={y}
+                r="4"
+                fill={chartType === 'return' ? "var(--color-primary)" : "#10b981"}
+                stroke="#ffffff"
+                strokeWidth="1.5"
+              />
+            );
+          })}
+        </svg>
       </div>
     </div>
   );
