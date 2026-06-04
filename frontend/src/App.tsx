@@ -48,6 +48,7 @@ interface StockEvaluationItem {
   stock_code: string;
   business_year: number;
   base_date: string;
+  strategy_type?: string;
   close_price?: number;
   market_cap?: number;
   net_income?: number;
@@ -102,6 +103,7 @@ interface PortfolioHolding {
   exit_price: number | null;
   score_at_exit: number | null;
   status: string;
+  updated_at: string;
 }
 
 interface HoldingChartPoint {
@@ -527,7 +529,9 @@ function App() {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
 
   // Tab State
-  const [activeTab, setActiveTab] = useState<'list' | 'dividend' | 'portfolio'>('list');
+  const [activeTab, setActiveTab] = useState<'list' | 'dividend' | 'growth'>('list');
+  const [subTab, setSubTab] = useState<'rankings' | 'portfolio'>('rankings');
+  const [detailStrategy, setDetailStrategy] = useState<'DIVIDEND' | 'GROWTH'>('DIVIDEND');
 
   // Portfolio states
   const [portfolioSummary, setPortfolioSummary] = useState<PortfolioSummary | null>(null);
@@ -546,7 +550,7 @@ function App() {
   const [loadingHoldingChart, setLoadingHoldingChart] = useState(false);
   const [errorHoldingChart, setErrorHoldingChart] = useState<string | null>(null);
 
-  // Dividend rankings state
+  // Dividend/Growth rankings state
   const [rankedStocks, setRankedStocks] = useState<EvaluatedStockItem[]>([]);
   const [rankedTotal, setRankedTotal] = useState(0);
   const [rankedPage, setRankedPage] = useState(1);
@@ -612,7 +616,7 @@ function App() {
               `• 점수 계산 완료: ${data.evaluation_rows.toLocaleString()}개 종목`);
         fetchRankedStocks();
         fetchRankingsSummary();
-        if (selectedStock) fetchEvaluation(selectedStock.stock_code);
+        if (selectedStock) fetchEvaluation(selectedStock.stock_code, detailStrategy);
       } else {
         alert(`점수 계산 중 오류 발생:\n${data.message}`);
       }
@@ -699,9 +703,9 @@ function App() {
       alert("DART 재무/배당 데이터 수집 및 DB 저장이 완료되었습니다.");
       if (selectedStock) {
         fetchFinancials(selectedStock.stock_code);
-        fetchEvaluation(selectedStock.stock_code);
+        fetchEvaluation(selectedStock.stock_code, detailStrategy);
       }
-      if (activeTab === 'dividend') {
+      if (activeTab === 'dividend' || activeTab === 'growth') {
         fetchRankedStocks();
         fetchRankingsSummary();
       }
@@ -768,11 +772,11 @@ function App() {
     }
   };
 
-  const fetchEvaluation = async (stockCode: string) => {
+  const fetchEvaluation = async (stockCode: string, strategy: 'DIVIDEND' | 'GROWTH' = 'DIVIDEND') => {
     setLoadingEvaluation(true);
     setErrorEvaluation(null);
     try {
-      const response = await fetch(`/api/stocks/${stockCode}/evaluation`);
+      const response = await fetch(`/api/stocks/${stockCode}/evaluation?strategy_type=${strategy}`);
       if (!response.ok) {
         throw new Error('평가 지표를 불러오는 데 실패했습니다.');
       }
@@ -801,6 +805,8 @@ function App() {
     if (rankedSearch.trim()) params.append('search', rankedSearch);
     if (rankedMarket) params.append('market', rankedMarket);
     if (onlyCandidates) params.append('is_candidate', '1');
+    const strategyType = activeTab === 'growth' ? 'GROWTH' : 'DIVIDEND';
+    params.append('strategy_type', strategyType);
 
     try {
       const response = await fetch(`/api/stocks/rankings?${params.toString()}`);
@@ -822,7 +828,8 @@ function App() {
 
   const fetchRankingsSummary = async () => {
     try {
-      const response = await fetch("/api/stocks/rankings?is_candidate=1&size=100");
+      const strategyType = activeTab === 'growth' ? 'GROWTH' : 'DIVIDEND';
+      const response = await fetch(`/api/stocks/rankings?strategy_type=${strategyType}&is_candidate=1&size=100`);
       if (response.ok) {
         const data = await response.json();
         setCandidateCount(data.total);
@@ -842,7 +849,8 @@ function App() {
     setLoadingPortfolio(true);
     setErrorPortfolio(null);
     try {
-      const sumRes = await fetch('/api/portfolio/summary');
+      const strategyType = activeTab === 'growth' ? 'GROWTH' : 'DIVIDEND';
+      const sumRes = await fetch(`/api/portfolio/summary?strategy_type=${strategyType}`);
       if (sumRes.status === 404) {
         setPortfolioSummary(null);
         setLoadingPortfolio(false);
@@ -852,13 +860,13 @@ function App() {
       const sumData = await sumRes.json();
       setPortfolioSummary(sumData);
 
-      const holdRes = await fetch('/api/portfolio/holdings');
+      const holdRes = await fetch(`/api/portfolio/holdings?strategy_type=${strategyType}`);
       if (holdRes.ok) setPortfolioHoldings(await holdRes.json());
 
-      const histRes = await fetch('/api/portfolio/history');
+      const histRes = await fetch(`/api/portfolio/history?strategy_type=${strategyType}`);
       if (histRes.ok) setPortfolioHistory(await histRes.json());
 
-      const txRes = await fetch('/api/portfolio/transactions?limit=50');
+      const txRes = await fetch(`/api/portfolio/transactions?strategy_type=${strategyType}&limit=50`);
       if (txRes.ok) setPortfolioTransactions(await txRes.json());
     } catch (err) {
       console.warn("Portfolio fetch failed: ", err);
@@ -894,6 +902,7 @@ function App() {
       alert("올바른 초기 자금을 입력해 주세요.");
       return;
     }
+    const strategyType = activeTab === 'growth' ? 'GROWTH' : 'DIVIDEND';
     const confirmed = window.confirm(`가상 포트폴리오를 초기 자금 ${balance.toLocaleString()}원으로 초기화하고 최신일 기준으로 첫 매수(70점 이상 종목)를 진행하시겠습니까?\n기존 기록은 모두 삭제됩니다.`);
     if (!confirmed) return;
 
@@ -902,7 +911,7 @@ function App() {
       const res = await fetch('/api/portfolio/initialize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ initial_balance: balance })
+        body: JSON.stringify({ initial_balance: balance, strategy_type: strategyType })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "초기화 실패");
@@ -918,7 +927,8 @@ function App() {
   const handleUpdatePortfolio = async () => {
     setUpdatingPortfolio(true);
     try {
-      const res = await fetch('/api/portfolio/update', { method: 'POST' });
+      const strategyType = activeTab === 'growth' ? 'GROWTH' : 'DIVIDEND';
+      const res = await fetch(`/api/portfolio/update?strategy_type=${strategyType}`, { method: 'POST' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "업데이트 실패");
       
@@ -940,22 +950,24 @@ function App() {
   }, [page, market]);
 
   useEffect(() => {
-    if (activeTab === 'dividend') {
+    if (activeTab === 'dividend' || activeTab === 'growth') {
       fetchRankedStocks();
     }
-  }, [rankedPage, rankedMarket, onlyCandidates, activeTab]);
+  }, [rankedPage, rankedMarket, onlyCandidates, activeTab, subTab]);
 
   useEffect(() => {
-    if (activeTab === 'dividend') {
+    if (activeTab === 'dividend' || activeTab === 'growth') {
       fetchRankingsSummary();
     }
   }, [activeTab]);
 
   useEffect(() => {
-    if (activeTab === 'portfolio') {
-      fetchPortfolioData();
+    if (activeTab === 'dividend' || activeTab === 'growth') {
+      if (subTab === 'portfolio') {
+        fetchPortfolioData();
+      }
     }
-  }, [activeTab]);
+  }, [activeTab, subTab]);
 
   // 자동완성: 검색어 입력 시 API 호출 (300ms debounce)
   const fetchSuggestions = useCallback(async (query: string) => {
@@ -1055,20 +1067,25 @@ function App() {
     fetchRankedStocks();
   };
 
-  const handleTabChange = (tab: 'list' | 'dividend' | 'portfolio') => {
+  const handleTabChange = (tab: 'list' | 'dividend' | 'growth') => {
     setSelectedStock(null);
     setSelectedHolding(null);
     setActiveTab(tab);
+    setSubTab('rankings');
   };
 
   const handleStockClick = (stock: StockItem) => {
+    const strategy = activeTab === 'growth' ? 'GROWTH' : 'DIVIDEND';
+    setDetailStrategy(strategy);
     setSelectedStock(stock);
     setSelectedHolding(null);
     fetchFinancials(stock.stock_code);
-    fetchEvaluation(stock.stock_code);
+    fetchEvaluation(stock.stock_code, strategy);
   };
 
   const handleHoldingClick = (holding: PortfolioHolding) => {
+    const strategy = activeTab === 'growth' ? 'GROWTH' : 'DIVIDEND';
+    setDetailStrategy(strategy);
     const dummyStock: StockItem = {
       stock_code: holding.stock_code,
       stock_name: holding.stock_name,
@@ -1078,8 +1095,15 @@ function App() {
     setSelectedStock(dummyStock);
     setSelectedHolding(holding);
     fetchFinancials(holding.stock_code);
-    fetchEvaluation(holding.stock_code);
+    fetchEvaluation(holding.stock_code, strategy);
     fetchHoldingChart(holding.id);
+  };
+
+  const handleDetailStrategyChange = (strategy: 'DIVIDEND' | 'GROWTH') => {
+    setDetailStrategy(strategy);
+    if (selectedStock) {
+      fetchEvaluation(selectedStock.stock_code, strategy);
+    }
   };
 
   // Render Detailed Financial Page
@@ -1105,20 +1129,55 @@ function App() {
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
                 종목 조회
               </li>
+              
               <li 
                 className={`nav-item ${activeTab === 'dividend' ? 'active' : ''}`}
                 onClick={() => handleTabChange('dividend')}
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
-                배당주 분석
+                안정 배당주 전략
               </li>
+              {activeTab === 'dividend' && (
+                <ul className="nav-sub-menu">
+                  <li 
+                    className={`nav-sub-item ${subTab === 'rankings' ? 'active' : ''}`}
+                    onClick={() => { setSelectedStock(null); setSelectedHolding(null); setSubTab('rankings'); }}
+                  >
+                    평가 순위
+                  </li>
+                  <li 
+                    className={`nav-sub-item ${subTab === 'portfolio' ? 'active' : ''}`}
+                    onClick={() => { setSelectedStock(null); setSelectedHolding(null); setSubTab('portfolio'); }}
+                  >
+                    가상 투자
+                  </li>
+                </ul>
+              )}
+
               <li 
-                className={`nav-item ${activeTab === 'portfolio' ? 'active' : ''}`}
-                onClick={() => handleTabChange('portfolio')}
+                className={`nav-item ${activeTab === 'growth' ? 'active' : ''}`}
+                onClick={() => handleTabChange('growth')}
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                가상 투자
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4.5 16.5c-1.5 1.25-2.5 3.5-2.5 3.5s2.25-1 3.5-2.5L16.5 6.5c1.5-1.5 1.5-4 0-5.5s-4-1.5-5.5 0L4.5 16.5z"></path><path d="M12 15l-3-3m-1.5 5.5l-2-2"></path></svg>
+                기회형 초성장주 전략
               </li>
+              {activeTab === 'growth' && (
+                <ul className="nav-sub-menu">
+                  <li 
+                    className={`nav-sub-item ${subTab === 'rankings' ? 'active' : ''}`}
+                    onClick={() => { setSelectedStock(null); setSelectedHolding(null); setSubTab('rankings'); }}
+                  >
+                    평가 순위
+                  </li>
+                  <li 
+                    className={`nav-sub-item ${subTab === 'portfolio' ? 'active' : ''}`}
+                    onClick={() => { setSelectedStock(null); setSelectedHolding(null); setSubTab('portfolio'); }}
+                  >
+                    가상 투자
+                  </li>
+                </ul>
+              )}
+
               <li>
                 <button
                   type="button"
@@ -1136,10 +1195,24 @@ function App() {
 
         {/* Main Content */}
         <main className="main-content">
-          <div>
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
             <button className="back-btn" onClick={() => { setSelectedStock(null); setSelectedHolding(null); }}>
               ← 목록으로 돌아가기
             </button>
+            <a 
+              href={`https://finance.naver.com/item/main.naver?code=${selectedStock.stock_code}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="naver-btn"
+              style={{ textDecoration: 'none' }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+              </svg>
+              네이버 증권 정보
+            </a>
           </div>
 
           <header className="stock-detail-header">
@@ -1148,17 +1221,38 @@ function App() {
               {selectedStock.sector && <span className="badge">{selectedStock.sector}</span>}
               <span className="badge">종목코드: {selectedStock.stock_code}</span>
               {selectedStock.dart_corp_code && <span className="badge">DART 기업코드: {selectedStock.dart_corp_code}</span>}
-              {evaluation?.is_candidate === 1 && <span className="badge primary">🌟 배당 우수 추천 종목</span>}
+              {evaluation?.is_candidate === 1 && (
+                <span className="badge primary">
+                  {detailStrategy === 'GROWTH' ? '🌟 초성장 추천 종목' : '🌟 배당 우수 추천 종목'}
+                </span>
+              )}
               {selectedHolding && <span className="badge warning" style={{ backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>📈 가상 투자 거래 분석</span>}
             </div>
             <h1>
-              {selectedStock.stock_name} {selectedHolding ? "가상 투자 매매일지 및 상세 분석" : "상세 재무 분석"}
+              {selectedStock.stock_name} {selectedHolding ? `가상 투자 매매일지 및 상세 분석 (${detailStrategy === 'GROWTH' ? '기회형 초성장' : '안정 배당'})` : `상세 재무 분석 (${detailStrategy === 'GROWTH' ? '기회형 초성장' : '안정 배당'})`}
             </h1>
             <p>
               {selectedHolding 
                 ? "해당 종목의 가상 투자 거래 성과(수익률 추이 및 보유 정보)와 연도별 재무 실적을 통합 분석합니다."
                 : "선택된 상장 기업의 연도별 연결 재무실적 및 주당 배당금 추이 현황을 조회합니다."}
             </p>
+
+            <div className="detail-strategy-selector" style={{ margin: '1.5rem 0 0.5rem', display: 'flex', gap: '0.5rem' }}>
+              <button 
+                className={`tab-btn ${detailStrategy === 'DIVIDEND' ? 'active' : ''}`}
+                style={{ padding: '0.5rem 1.2rem', borderRadius: '8px', fontSize: '0.85rem' }}
+                onClick={() => handleDetailStrategyChange('DIVIDEND')}
+              >
+                🛡️ 안정 배당주 평가 기준
+              </button>
+              <button 
+                className={`tab-btn ${detailStrategy === 'GROWTH' ? 'active' : ''}`}
+                style={{ padding: '0.5rem 1.2rem', borderRadius: '8px', fontSize: '0.85rem' }}
+                onClick={() => handleDetailStrategyChange('GROWTH')}
+              >
+                🚀 기회형 초성장주 평가 기준
+              </button>
+            </div>
           </header>
 
           {selectedHolding && (
@@ -1346,7 +1440,7 @@ function App() {
             <div className="chart-card error-card" style={{ height: '180px' }}>
               <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--color-danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
               <p style={{ fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>{errorEvaluation}</p>
-              <button className="back-btn" style={{ padding: '0.4rem 1rem', marginTop: '0.5rem', fontSize: '0.85rem' }} onClick={() => fetchEvaluation(selectedStock.stock_code)}>
+              <button className="back-btn" style={{ padding: '0.4rem 1rem', marginTop: '0.5rem', fontSize: '0.85rem' }} onClick={() => fetchEvaluation(selectedStock.stock_code, detailStrategy)}>
                 다시 시도
               </button>
             </div>
@@ -1354,7 +1448,7 @@ function App() {
             <div className="evaluation-card">
               <div className="evaluation-header">
                 <div className="eval-title-group">
-                  <h3>투자 가치 및 배당주 매력도 분석</h3>
+                  <h3>{detailStrategy === 'GROWTH' ? '초성장주 투자 매력도 및 성장성 분석' : '투자 가치 및 배당주 매력도 분석'}</h3>
                   <span className="eval-as-of">평가 기준일: {evaluation.base_date ? `${evaluation.base_date.slice(0,4)}-${evaluation.base_date.slice(4,6)}-${evaluation.base_date.slice(6,8)}` : '-'} ({evaluation.business_year}년 결산 기준)</span>
                 </div>
                 <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1362,7 +1456,9 @@ function App() {
                     🔍 점수 산출 내역 보기
                   </button>
                   {evaluation.is_candidate === 1 && (
-                    <span className="candidate-badge-large">🌟 추천 배당주 후보군 지정</span>
+                    <span className="candidate-badge-large">
+                      {detailStrategy === 'GROWTH' ? '🌟 추천 초성장주 후보군 지정' : '🌟 추천 배당주 후보군 지정'}
+                    </span>
                   )}
                 </div>
               </div>
@@ -1377,7 +1473,7 @@ function App() {
                   </div>
                   <span className="score-desc">
                     {evaluation.total_score !== undefined && evaluation.total_score !== null && evaluation.total_score >= 70
-                      ? '재무 건전성과 배당 매력도가 최고 수준인 종목입니다.'
+                      ? (detailStrategy === 'GROWTH' ? '재무 건전성과 고속 성장 가속도가 최고 수준인 성장주 종목입니다.' : '재무 건전성과 배당 매력도가 최고 수준인 종목입니다.')
                       : evaluation.total_score !== undefined && evaluation.total_score !== null && evaluation.total_score >= 60
                       ? '안정적이지만 밸류에이션 조정이 필요할 수 있습니다.'
                       : '투자 가치 기준점보다 하위에 위치한 종목입니다.'}
@@ -1400,17 +1496,17 @@ function App() {
 
                   <div className="subscore-item">
                     <div className="subscore-header">
-                      <span>본업 지속 성장성 (성장성)</span>
-                      <span className="subscore-val">{evaluation.growth_score || 0} / 15점</span>
+                      <span>{detailStrategy === 'GROWTH' ? '지속성장 가속도 (성장성)' : '본업 지속 성장성 (성장성)'}</span>
+                      <span className="subscore-val">{evaluation.growth_score || 0} / {detailStrategy === 'GROWTH' ? 35 : 15}점</span>
                     </div>
                     <div className="progress-bg">
-                      <div className="progress-bar color-growth" style={{ width: `${((evaluation.growth_score || 0) / 15) * 100}%` }}></div>
+                      <div className="progress-bar color-growth" style={{ width: `${((evaluation.growth_score || 0) / (detailStrategy === 'GROWTH' ? 35 : 15)) * 100}%` }}></div>
                     </div>
                   </div>
 
                   <div className="subscore-item">
                     <div className="subscore-header">
-                      <span>가격 매력도 및 저평가 (밸류에이션)</span>
+                      <span>{detailStrategy === 'GROWTH' ? '효율성 및 수익성 (수익성)' : '가격 매력도 및 저평가 (밸류에이션)'}</span>
                       <span className="subscore-val">{evaluation.undervaluation_score || 0} / 25점</span>
                     </div>
                     <div className="progress-bg">
@@ -1420,21 +1516,21 @@ function App() {
 
                   <div className="subscore-item">
                     <div className="subscore-header">
-                      <span>주주 환원 및 배당 매력 (수익성)</span>
-                      <span className="subscore-val">{evaluation.shareholder_return_score || 0} / 25점</span>
+                      <span>{detailStrategy === 'GROWTH' ? '성장 복리 재투자 (유보율)' : '주주 환원 및 배당 매력 (수익성)'}</span>
+                      <span className="subscore-val">{evaluation.shareholder_return_score || 0} / {detailStrategy === 'GROWTH' ? 15 : 25}점</span>
                     </div>
                     <div className="progress-bg">
-                      <div className="progress-bar color-return" style={{ width: `${((evaluation.shareholder_return_score || 0) / 25) * 100}%` }}></div>
+                      <div className="progress-bar color-return" style={{ width: `${((evaluation.shareholder_return_score || 0) / (detailStrategy === 'GROWTH' ? 15 : 25)) * 100}%` }}></div>
                     </div>
                   </div>
 
                   <div className="subscore-item">
                     <div className="subscore-header">
-                      <span>시장 및 지배구조 리스크 (신뢰성)</span>
-                      <span className="subscore-val">{evaluation.market_governance_score || 0} / 20점</span>
+                      <span>{detailStrategy === 'GROWTH' ? '벨류에이션 가성비 (PEG)' : '시장 및 지배구조 리스크 (신뢰성)'}</span>
+                      <span className="subscore-val">{evaluation.market_governance_score || 0} / {detailStrategy === 'GROWTH' ? 10 : 20}점</span>
                     </div>
                     <div className="progress-bg">
-                      <div className="progress-bar color-governance" style={{ width: `${((evaluation.market_governance_score || 0) / 20) * 100}%` }}></div>
+                      <div className="progress-bar color-governance" style={{ width: `${((evaluation.market_governance_score || 0) / (detailStrategy === 'GROWTH' ? 10 : 20)) * 100}%` }}></div>
                     </div>
                   </div>
                 </div>
@@ -1455,16 +1551,39 @@ function App() {
                       <span className="label">PBR (주가순자산비율)</span>
                       <span className="val">{evaluation.pbr !== undefined && evaluation.pbr !== null ? `${evaluation.pbr.toFixed(2)}배` : '-'}</span>
                     </div>
-                    <div className="metric-box">
-                      <span className="label">배당 수익률 (Yield)</span>
-                      <span className="val" style={{ color: '#047857' }}>{evaluation.dividend_yield !== undefined && evaluation.dividend_yield !== null ? `${evaluation.dividend_yield.toFixed(2)}%` : '-'}</span>
-                    </div>
-                    <div className="metric-box" style={{ gridColumn: 'span 2' }}>
-                      <span className="label">배당 지급 연수 및 삭감 횟수</span>
-                      <span className="val" style={{ fontSize: '0.9rem' }}>
-                        {evaluation.dividend_years || 0}년 연속 / 삭감 {evaluation.dividend_decrease_count || 0}회
-                      </span>
-                    </div>
+                    {detailStrategy === 'GROWTH' ? (
+                      <>
+                        <div className="metric-box">
+                          <span className="label">PEG (PER/성장률)</span>
+                          <span className="val" style={{ color: '#4f46e5', fontWeight: 700 }}>
+                            {evaluation.per && evaluation.eps_growth && evaluation.eps_growth > 0 
+                              ? `${(evaluation.per / evaluation.eps_growth).toFixed(2)}배` 
+                              : '-'}
+                          </span>
+                        </div>
+                        <div className="metric-box">
+                          <span className="label">매출액 성장률</span>
+                          <span className="val">{evaluation.revenue_growth !== undefined && evaluation.revenue_growth !== null ? `${evaluation.revenue_growth.toFixed(2)}%` : '-'}</span>
+                        </div>
+                        <div className="metric-box">
+                          <span className="label">EPS 성장률</span>
+                          <span className="val">{evaluation.eps_growth !== undefined && evaluation.eps_growth !== null ? `${evaluation.eps_growth.toFixed(2)}%` : '-'}</span>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="metric-box">
+                          <span className="label">배당 수익률 (Yield)</span>
+                          <span className="val" style={{ color: '#047857' }}>{evaluation.dividend_yield !== undefined && evaluation.dividend_yield !== null ? `${evaluation.dividend_yield.toFixed(2)}%` : '-'}</span>
+                        </div>
+                        <div className="metric-box" style={{ gridColumn: 'span 2' }}>
+                          <span className="label">배당 지급 연수 및 삭감 횟수</span>
+                          <span className="val" style={{ fontSize: '0.9rem' }}>
+                            {evaluation.dividend_years || 0}년 연속 / 삭감 {evaluation.dividend_decrease_count || 0}회
+                          </span>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1625,6 +1744,7 @@ function App() {
         {showDetailsModal && evaluation && (
           <ScoreDetailsOverlay 
             evaluation={evaluation} 
+            financials={financials}
             onClose={() => setShowDetailsModal(false)} 
           />
         )}
@@ -1649,20 +1769,55 @@ function App() {
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
               종목 조회
             </li>
+            
             <li 
               className={`nav-item ${activeTab === 'dividend' ? 'active' : ''}`}
               onClick={() => handleTabChange('dividend')}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
-              배당주 분석
+              안정 배당주 전략
             </li>
+            {activeTab === 'dividend' && (
+              <ul className="nav-sub-menu">
+                <li 
+                  className={`nav-sub-item ${subTab === 'rankings' ? 'active' : ''}`}
+                  onClick={() => setSubTab('rankings')}
+                >
+                  평가 순위
+                </li>
+                <li 
+                  className={`nav-sub-item ${subTab === 'portfolio' ? 'active' : ''}`}
+                  onClick={() => setSubTab('portfolio')}
+                >
+                  가상 투자
+                </li>
+              </ul>
+            )}
+
             <li 
-              className={`nav-item ${activeTab === 'portfolio' ? 'active' : ''}`}
-              onClick={() => handleTabChange('portfolio')}
+              className={`nav-item ${activeTab === 'growth' ? 'active' : ''}`}
+              onClick={() => handleTabChange('growth')}
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-              가상 투자
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4.5 16.5c-1.5 1.25-2.5 3.5-2.5 3.5s2.25-1 3.5-2.5L16.5 6.5c1.5-1.5 1.5-4 0-5.5s-4-1.5-5.5 0L4.5 16.5z"></path><path d="M12 15l-3-3m-1.5 5.5l-2-2"></path></svg>
+              기회형 초성장주 전략
             </li>
+            {activeTab === 'growth' && (
+              <ul className="nav-sub-menu">
+                <li 
+                  className={`nav-sub-item ${subTab === 'rankings' ? 'active' : ''}`}
+                  onClick={() => setSubTab('rankings')}
+                >
+                  평가 순위
+                </li>
+                <li 
+                  className={`nav-sub-item ${subTab === 'portfolio' ? 'active' : ''}`}
+                  onClick={() => setSubTab('portfolio')}
+                >
+                  가상 투자
+                </li>
+              </ul>
+            )}
+
             <li>
               <button
                 type="button"
@@ -1921,512 +2076,553 @@ function App() {
           </>
         )}
 
-        {activeTab === 'dividend' && (
+        {(activeTab === 'dividend' || activeTab === 'growth') && (
           <>
-            <header className="header-section">
-              <div className="header-title">
-                <h1>우수 배당주 평가 순위</h1>
-                <p>투자 가치 분석 전략에 따라 점수가 산출된 종목들의 종합 평가 순위를 조회합니다. 항목을 클릭하면 상세 재무 및 차트를 조회할 수 있습니다.</p>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                {usingFallback && (
-                  <span style={{ fontSize: '0.8rem', backgroundColor: '#fee2e2', color: '#b91c1c', padding: '0.35rem 0.75rem', borderRadius: '20px', fontWeight: 600 }}>
-                    ⚠️ 데모용 오프라인 모드
-                  </span>
-                )}
-                {!usingFallback && (
-                  <button
-                    id="btn-evaluate"
-                    className={`sync-btn evaluate-btn ${evaluating ? 'loading' : ''}`}
-                    onClick={handleEvaluate}
-                    disabled={evaluating || syncingPrices}
-                    title="최신 주가 기준으로 전체 종목 투자 점수를 재계산합니다"
-                  >
-                    <svg className="sync-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-                    </svg>
-                    {evaluating ? '점수 계산 중...' : '점수 계산'}
-                  </button>
-                )}
-              </div>
-            </header>
+            {/* Strategy Sub-tabs for mobile/convenience */}
+            <div className="strategy-subtabs">
+              <button 
+                className={`subtab-btn ${subTab === 'rankings' ? 'active' : ''}`}
+                onClick={() => setSubTab('rankings')}
+              >
+                📊 전략 평가 순위
+              </button>
+              <button 
+                className={`subtab-btn ${subTab === 'portfolio' ? 'active' : ''}`}
+                onClick={() => setSubTab('portfolio')}
+              >
+                💼 가상 투자 시뮬레이션
+              </button>
+            </div>
 
-            {/* Summary grid */}
-            <section className="summary-grid">
-              <div className="summary-card">
-                <span className="card-title">전체 평가 대상 종목</span>
-                <span className="card-value">{rankedTotal.toLocaleString()}개</span>
-              </div>
-              <div className="summary-card">
-                <span className="card-title">추천 배당주 후보 수</span>
-                <span className="card-value" style={{ color: 'var(--color-primary)' }}>{candidateCount.toLocaleString()}개</span>
-              </div>
-              <div className="summary-card">
-                <span className="card-title">추천 종목 평균 점수</span>
-                <span className="card-value" style={{ color: '#059669' }}>{avgScore}점</span>
-              </div>
-            </section>
-
-            {/* Filters and Searches */}
-            <section className="controls-card">
-              <div className="search-filter-row">
-                <div className="search-input-wrapper">
-                  <svg className="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                  <input
-                    type="text"
-                    placeholder="종목명, 종목코드, 업종 검색 후 엔터 또는 조회 버튼..."
-                    className="search-input"
-                    value={rankedSearch}
-                    onChange={(e) => setRankedSearch(e.target.value)}
-                    onKeyDown={handleRankedSearchKeyPress}
-                  />
-                </div>
-                
-                <select 
-                  className="market-select"
-                  value={rankedMarket}
-                  onChange={(e) => { setRankedMarket(e.target.value); setRankedPage(1); }}
-                >
-                  <option value="">모든 시장</option>
-                  <option value="KOSPI">KOSPI</option>
-                  <option value="KOSDAQ">KOSDAQ</option>
-                </select>
-
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem', color: 'var(--text-secondary)', userSelect: 'none', marginLeft: '0.5rem' }}>
-                  <input 
-                    type="checkbox" 
-                    checked={onlyCandidates} 
-                    onChange={(e) => { setOnlyCandidates(e.target.checked); setRankedPage(1); }}
-                    style={{ width: '16px', height: '16px', cursor: 'pointer' }}
-                  />
-                  추천 배당주 후보만 보기
-                </label>
-
-                <button 
-                  className="page-btn active" 
-                  style={{ padding: '0.5rem 1.5rem', borderRadius: '10px', marginLeft: 'auto' }}
-                  onClick={handleRankedSearchSubmit}
-                >
-                  조회
-                </button>
-              </div>
-            </section>
-
-            {/* Table representation */}
-            <section className="table-wrapper">
-              {loadingRanked ? (
-                <div className="loading-wrapper">
-                  <div className="spinner"></div>
-                  <p>평가 순위 목록을 서버에서 불러오는 중입니다...</p>
-                </div>
-              ) : errorRanked ? (
-                <div className="error-card" style={{ margin: '2rem auto', maxWidth: '400px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--color-danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-                  <p style={{ fontWeight: 600, color: 'var(--text-primary)', marginTop: '0.75rem', marginBottom: '0.75rem' }}>{errorRanked}</p>
-                  <button className="back-btn" style={{ padding: '0.4rem 1.2rem', fontSize: '0.85rem' }} onClick={fetchRankedStocks}>
-                    다시 시도
-                  </button>
-                </div>
-              ) : rankedStocks.length === 0 ? (
-                <div className="empty-wrapper">
-                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="8" y1="12" x2="16" y2="12"></line></svg>
-                  <p>조건을 만족하는 평가 종목이 존재하지 않습니다.</p>
-                </div>
-              ) : (
-                <>
-                  <table className="stock-table">
-                    <thead>
-                      <tr>
-                        <th style={{ width: '60px', textAlign: 'center' }}>순위</th>
-                        <th>종목코드</th>
-                        <th>종목명</th>
-                        <th className="hide-on-mobile">시장</th>
-                        <th className="hide-on-tablet">주요 업종</th>
-                        <th className="hide-on-mobile" style={{ textAlign: 'center' }}>안정성</th>
-                        <th className="hide-on-mobile" style={{ textAlign: 'center' }}>성장성</th>
-                        <th className="hide-on-mobile" style={{ textAlign: 'center' }}>저평가</th>
-                        <th className="hide-on-mobile" style={{ textAlign: 'center' }}>주주환원</th>
-                        <th className="hide-on-mobile" style={{ textAlign: 'center' }}>거버넌스</th>
-                        <th style={{ textAlign: 'center' }}>종합 점수</th>
-                        <th style={{ textAlign: 'center' }}>추천 여부</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rankedStocks.map((stock, index) => {
-                        const rank = (rankedPage - 1) * 15 + index + 1;
-                        const isHigh = (stock.total_score || 0) >= 70;
-                        const isMid = (stock.total_score || 0) >= 60 && (stock.total_score || 0) < 70;
-                        const scoreColor = isHigh ? '#10b981' : isMid ? '#f59e0b' : '#9ca3af';
-                        
-                        const fullStockItem: StockItem = {
-                          stock_code: stock.stock_code,
-                          stock_name: stock.stock_name,
-                          market: stock.market,
-                          sector: stock.sector || undefined,
-                          is_active: 1
-                        };
-
-                        return (
-                          <tr 
-                            key={stock.stock_code} 
-                            className="clickable-row" 
-                            onClick={() => handleStockClick(fullStockItem)}
-                          >
-                            <td style={{ textAlign: 'center', fontWeight: 700, color: rank <= 3 ? 'var(--color-primary)' : 'var(--text-secondary)' }}>
-                              {rank}
-                            </td>
-                            <td style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--color-primary)' }}>
-                              {stock.stock_code}
-                            </td>
-                            <td style={{ fontWeight: 600 }}>{stock.stock_name}</td>
-                            <td className="hide-on-mobile">
-                              <span className={`market-badge ${stock.market.toLowerCase()}`}>
-                                {stock.market}
-                              </span>
-                            </td>
-                            <td className="hide-on-tablet" style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>{stock.sector || '-'}</td>
-                            <td className="hide-on-mobile" style={{ textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>
-                              {stock.financial_stability_score !== null && stock.financial_stability_score !== undefined ? `${stock.financial_stability_score}점` : '-'}
-                            </td>
-                            <td className="hide-on-mobile" style={{ textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>
-                              {stock.growth_score !== null && stock.growth_score !== undefined ? `${stock.growth_score}점` : '-'}
-                            </td>
-                            <td className="hide-on-mobile" style={{ textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>
-                              {stock.undervaluation_score !== null && stock.undervaluation_score !== undefined ? `${stock.undervaluation_score}점` : '-'}
-                            </td>
-                            <td className="hide-on-mobile" style={{ textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>
-                              {stock.shareholder_return_score !== null && stock.shareholder_return_score !== undefined ? `${stock.shareholder_return_score}점` : '-'}
-                            </td>
-                            <td className="hide-on-mobile" style={{ textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>
-                              {stock.market_governance_score !== null && stock.market_governance_score !== undefined ? `${stock.market_governance_score}점` : '-'}
-                            </td>
-                            <td style={{ textAlign: 'center', fontWeight: 700, color: scoreColor, fontSize: '1.05rem' }}>
-                              {stock.total_score !== null && stock.total_score !== undefined ? `${stock.total_score}점` : '-'}
-                            </td>
-                            <td style={{ textAlign: 'center' }}>
-                              {stock.is_candidate === 1 ? (
-                                <span style={{ fontSize: '0.75rem', backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)', padding: '0.25rem 0.5rem', borderRadius: '4px', fontWeight: 600 }}>
-                                  🌟 추천
-                                </span>
-                              ) : (
-                                <span style={{ fontSize: '0.75rem', backgroundColor: '#f3f4f6', color: '#9ca3af', padding: '0.25rem 0.5rem', borderRadius: '4px', fontWeight: 500 }}>
-                                  제외
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-
-                  {/* Paging component */}
-                  <div className="pagination-container">
-                    <div className="pagination-info">
-                      총 <strong>{rankedTotal.toLocaleString()}</strong>개 중 <strong>{(rankedPage - 1) * 15 + 1} - {Math.min(rankedPage * 15, rankedTotal)}</strong>번째 표시 중
-                    </div>
-                    <div className="pagination-buttons">
-                      <button 
-                        className="page-btn" 
-                        onClick={() => setRankedPage(1)} 
-                        disabled={rankedPage === 1}
-                      >
-                        맨앞
-                      </button>
-                      <button 
-                        className="page-btn" 
-                        onClick={() => setRankedPage(p => Math.max(1, p - 1))} 
-                        disabled={rankedPage === 1}
-                      >
-                        이전
-                      </button>
-                      
-                      {Array.from({ length: Math.min(5, rankedPages) }, (_, i) => {
-                        let pageNum = rankedPage;
-                        if (rankedPage <= 3) {
-                          pageNum = i + 1;
-                        } else if (rankedPage > rankedPages - 2) {
-                          pageNum = rankedPages - 4 + i;
-                        } else {
-                          pageNum = rankedPage - 2 + i;
-                        }
-                        if (pageNum < 1 || pageNum > rankedPages) return null;
-                        
-                        return (
-                          <button 
-                            key={pageNum}
-                            className={`page-btn ${rankedPage === pageNum ? 'active' : ''}`}
-                            onClick={() => setRankedPage(pageNum)}
-                          >
-                            {pageNum}
-                          </button>
-                        );
-                      })}
-
-                      <button 
-                        className="page-btn" 
-                        onClick={() => setRankedPage(p => Math.min(rankedPages, p + 1))} 
-                        disabled={rankedPage === rankedPages}
-                      >
-                        다음
-                      </button>
-                      <button 
-                        className="page-btn" 
-                        onClick={() => setRankedPage(rankedPages)} 
-                        disabled={rankedPage === rankedPages}
-                      >
-                        맨뒤
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
-            </section>
-          </>
-        )}
-
-        {activeTab === 'portfolio' && (
-          <>
-            <header className="header-section">
-              <div className="header-title">
-                <h1>가상 투자 시뮬레이션 (저평가 배당주 전략)</h1>
-                <p>배당주 분석 점수 70점 이상인 종목에 진입하여 보유하고, 60점 미만으로 하락 시 매도하는 전략의 가상 포트폴리오를 운용합니다.</p>
-              </div>
-            </header>
-
-            {loadingPortfolio ? (
-              <div className="loading-wrapper" style={{ minHeight: '300px' }}>
-                <div className="spinner"></div>
-                <p>가상 투자 데이터를 불러오는 중입니다...</p>
-              </div>
-            ) : errorPortfolio ? (
-              <div className="error-card" style={{ margin: '2rem auto', maxWidth: '450px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--color-danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-                <p style={{ fontWeight: 600, color: 'var(--text-primary)', marginTop: '0.75rem', marginBottom: '0.75rem' }}>{errorPortfolio}</p>
-                <button className="back-btn" style={{ padding: '0.4rem 1.2rem', fontSize: '0.85rem' }} onClick={fetchPortfolioData}>
-                  다시 시도
-                </button>
-              </div>
-            ) : portfolioSummary === null ? (
-              <div className="controls-card" style={{ padding: '3rem', textAlign: 'center', maxWidth: '600px', margin: '2rem auto' }}>
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: '1.5rem' }}><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
-                <h3 style={{ marginBottom: '1rem', color: 'var(--text-primary)' }}>가상 투자 포트폴리오를 시작해보세요</h3>
-                <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem', fontSize: '0.95rem', lineHeight: '1.6' }}>
-                  초기 자금을 설정하고 아래 버튼을 클릭하면, 가장 최신의 데이터 기준으로 70점 이상인 종목에 분산 투자를 최초 진입하여 가상 운용을 기동합니다.
-                </p>
-                <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', alignItems: 'center' }}>
-                  <div style={{ position: 'relative', width: '220px' }}>
-                    <input
-                      type="text"
-                      className="search-input"
-                      style={{ paddingLeft: '1rem', fontSize: '1.05rem', fontWeight: 600, textAlign: 'right', paddingRight: '2.5rem' }}
-                      value={initialBalanceInput}
-                      onChange={(e) => {
-                        const val = e.target.value.replace(/[^0-9]/g, '');
-                        setInitialBalanceInput(val ? Number(val).toLocaleString() : '');
-                      }}
-                    />
-                    <span style={{ position: 'absolute', right: '1rem', top: '50%', transform: 'translateY(-50%)', fontWeight: 600, color: 'var(--text-secondary)' }}>원</span>
-                  </div>
-                  <button 
-                    className="sync-btn evaluate-btn" 
-                    style={{ padding: '0.75rem 2rem', fontSize: '0.95rem', background: 'linear-gradient(135deg, var(--color-primary), #4f46e5)' }}
-                    onClick={handleInitializePortfolio}
-                    disabled={initializingPortfolio}
-                  >
-                    {initializingPortfolio ? "포트폴리오 생성 중..." : "가상 투자 시작하기"}
-                  </button>
-                </div>
-              </div>
-            ) : (
+            {subTab === 'rankings' && (
               <>
-                {/* 1. 요약 카드 위젯 */}
+                <header className="header-section">
+                  <div className="header-title">
+                    <h1>{activeTab === 'growth' ? '기회형 초성장주 평가 순위' : '우수 배당주 평가 순위'}</h1>
+                    <p>{activeTab === 'growth' ? '성장성, 효율성 및 가성비(PEG)에 따라 기회형 초성장 종목의 평가 순위를 조회합니다. 항목을 클릭하면 상세 재무 및 차트를 조회할 수 있습니다.' : '투자 가치 분석 전략에 따라 점수가 산출된 종목들의 종합 평가 순위를 조회합니다. 항목을 클릭하면 상세 재무 및 차트를 조회할 수 있습니다.'}</p>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    {usingFallback && (
+                      <span style={{ fontSize: '0.8rem', backgroundColor: '#fee2e2', color: '#b91c1c', padding: '0.35rem 0.75rem', borderRadius: '20px', fontWeight: 600 }}>
+                        ⚠️ 데모용 오프라인 모드
+                      </span>
+                    )}
+                    {!usingFallback && (
+                      <button
+                        id="btn-evaluate"
+                        className={`sync-btn evaluate-btn ${evaluating ? 'loading' : ''}`}
+                        onClick={handleEvaluate}
+                        disabled={evaluating || syncingPrices}
+                        title="최신 주가 기준으로 전체 종목 투자 점수를 재계산합니다"
+                      >
+                        <svg className="sync-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                        </svg>
+                        {evaluating ? '점수 계산 중...' : '점수 계산'}
+                      </button>
+                    )}
+                  </div>
+                </header>
+
+                {/* Summary grid */}
                 <section className="summary-grid">
                   <div className="summary-card">
-                    <span className="card-title">모의지수 자산액</span>
-                    <span className="card-value" style={{ color: 'var(--text-primary)' }}>{formatWon(portfolioSummary.total_asset)}</span>
+                    <span className="card-title">전체 평가 대상 종목</span>
+                    <span className="card-value">{rankedTotal.toLocaleString()}개</span>
                   </div>
                   <div className="summary-card">
-                    <span className="card-title">진행 중인 종목 수</span>
-                    <span className="card-value" style={{ color: 'var(--text-secondary)' }}>
-                      {portfolioHoldings.filter(h => h.status === 'ACTIVE').length}개
-                    </span>
+                    <span className="card-title">{activeTab === 'growth' ? '추천 초성장주 후보 수' : '추천 배당주 후보 수'}</span>
+                    <span className="card-value" style={{ color: 'var(--color-primary)' }}>{candidateCount.toLocaleString()}개</span>
                   </div>
                   <div className="summary-card">
-                    <span className="card-title">지수 누적 수익률</span>
-                    <span className={`card-value ${portfolioSummary.total_return >= 0 ? 'color-up' : 'color-down'}`}>
-                      {portfolioSummary.total_return >= 0 ? `+${portfolioSummary.total_return.toFixed(2)}%` : `${portfolioSummary.total_return.toFixed(2)}%`}
-                    </span>
-                  </div>
-                  <div className="summary-card">
-                    <span className="card-title">최대 낙폭 (MDD)</span>
-                    <span className="card-value" style={{ color: 'var(--color-danger)' }}>-{portfolioSummary.mdd.toFixed(2)}%</span>
-                  </div>
-                  <div className="summary-card">
-                    <span className="card-title">완료 거래 승률</span>
-                    <span className="card-value" style={{ color: '#059669' }}>{portfolioSummary.win_rate.toFixed(1)}%</span>
+                    <span className="card-title">추천 종목 평균 점수</span>
+                    <span className="card-value" style={{ color: '#059669' }}>{avgScore}점</span>
                   </div>
                 </section>
 
-                {/* 2. 제어 컨트롤러 */}
-                <section className="controls-card" style={{ padding: '1.25rem 2rem', marginBottom: '1.5rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
-                    <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                      최종 업데이트 시점: <strong>{portfolioSummary.updated_at}</strong>
+                {/* Filters and Searches */}
+                <section className="controls-card">
+                  <div className="search-filter-row">
+                    <div className="search-input-wrapper">
+                      <svg className="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                      <input
+                        type="text"
+                        placeholder="종목명, 종목코드, 업종 검색 후 엔터 또는 조회 버튼..."
+                        className="search-input"
+                        value={rankedSearch}
+                        onChange={(e) => setRankedSearch(e.target.value)}
+                        onKeyDown={handleRankedSearchKeyPress}
+                      />
                     </div>
-                    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                      <button 
-                        className={`sync-btn financial-sync-btn ${updatingPortfolio ? 'loading' : ''}`}
-                        style={{ padding: '0.5rem 1.25rem', fontSize: '0.9rem', display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
-                        onClick={handleUpdatePortfolio}
-                        disabled={updatingPortfolio || initializingPortfolio}
-                      >
-                        <svg className="sync-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
-                        {updatingPortfolio ? "포트폴리오 업데이트 중..." : "오늘 포트폴리오 업데이트"}
-                      </button>
-                      <button 
-                        className="reset-db-btn"
-                        style={{ padding: '0.5rem 1.25rem', fontSize: '0.9rem', width: 'auto', margin: 0 }}
-                        onClick={handleInitializePortfolio}
-                        disabled={initializingPortfolio || updatingPortfolio}
-                      >
-                        초기화 및 재설정
-                      </button>
-                    </div>
+                    
+                    <select 
+                      className="market-select"
+                      value={rankedMarket}
+                      onChange={(e) => { setRankedMarket(e.target.value); setRankedPage(1); }}
+                    >
+                      <option value="">모든 시장</option>
+                      <option value="KOSPI">KOSPI</option>
+                      <option value="KOSDAQ">KOSDAQ</option>
+                    </select>
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem', color: 'var(--text-secondary)', userSelect: 'none', marginLeft: '0.5rem' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={onlyCandidates} 
+                        onChange={(e) => { setOnlyCandidates(e.target.checked); setRankedPage(1); }}
+                        style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                      />
+                      {activeTab === 'growth' ? '추천 초성장주 후보만 보기' : '추천 배당주 후보만 보기'}
+                    </label>
+
+                    <button 
+                      className="page-btn active" 
+                      style={{ padding: '0.5rem 1.5rem', borderRadius: '10px', marginLeft: 'auto' }}
+                      onClick={handleRankedSearchSubmit}
+                    >
+                      조회
+                    </button>
                   </div>
                 </section>
 
-                {/* 3. 자산 성장 추이 차트 */}
-                <PortfolioChart history={portfolioHistory} />
-
-                <div className="detail-section" style={{ marginTop: '1.5rem' }}>
-                  {/* 4. 현재 보유 종목 리스트 */}
-                  <div>
-                    <h3 className="section-title">💼 가상 투자 종목 기록 및 수익률 현황 (수익률 순)</h3>
-                    <div className="financials-table-wrapper">
+                {/* Table representation */}
+                <section className="table-wrapper">
+                  {loadingRanked ? (
+                    <div className="loading-wrapper">
+                      <div className="spinner"></div>
+                      <p>평가 순위 목록을 서버에서 불러오는 중입니다...</p>
+                    </div>
+                  ) : errorRanked ? (
+                    <div className="error-card" style={{ margin: '2rem auto', maxWidth: '400px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--color-danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                      <p style={{ fontWeight: 600, color: 'var(--text-primary)', marginTop: '0.75rem', marginBottom: '0.75rem' }}>{errorRanked}</p>
+                      <button className="back-btn" style={{ padding: '0.4rem 1.2rem', fontSize: '0.85rem' }} onClick={fetchRankedStocks}>
+                        다시 시도
+                      </button>
+                    </div>
+                  ) : rankedStocks.length === 0 ? (
+                    <div className="empty-wrapper">
+                      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+                      <p>조건을 만족하는 평가 종목이 존재하지 않습니다.</p>
+                    </div>
+                  ) : (
+                    <>
                       <table className="stock-table">
                         <thead>
-                          <tr>
-                            <th>종목코드</th>
-                            <th>종목명</th>
-                            <th>진입일자</th>
-                            <th>청산일자</th>
-                            <th className="number-align">진입가격 (원)</th>
-                            <th className="number-align">현재/청산가격 (원)</th>
-                            <th className="number-align">수익률</th>
-                            <th style={{ textAlign: 'center' }}>진입 점수</th>
-                            <th style={{ textAlign: 'center' }}>청산 점수</th>
-                            <th style={{ textAlign: 'center' }}>상태</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {portfolioHoldings.length === 0 ? (
+                          {activeTab === 'growth' ? (
                             <tr>
-                              <td colSpan={10} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
-                                가상 투자 종목 기록이 없습니다.
-                              </td>
+                              <th style={{ width: '60px', textAlign: 'center' }}>순위</th>
+                              <th>종목코드</th>
+                              <th>종목명</th>
+                              <th className="hide-on-mobile">시장</th>
+                              <th className="hide-on-tablet">주요 업종</th>
+                              <th className="hide-on-mobile" style={{ textAlign: 'center' }}>안정성</th>
+                              <th className="hide-on-mobile" style={{ textAlign: 'center' }}>성장성</th>
+                              <th className="hide-on-mobile" style={{ textAlign: 'center' }}>효율성</th>
+                              <th className="hide-on-mobile" style={{ textAlign: 'center' }}>재투자</th>
+                              <th className="hide-on-mobile" style={{ textAlign: 'center' }}>PEG 가성비</th>
+                              <th style={{ textAlign: 'center' }}>종합 점수</th>
+                              <th style={{ textAlign: 'center' }}>추천 여부</th>
                             </tr>
                           ) : (
-                            portfolioHoldings.map((hold, idx) => {
-                              const isActive = hold.status === 'ACTIVE';
-                              return (
-                                <tr 
-                                  key={`${hold.stock_code}-${hold.entry_date}-${idx}`}
-                                  className="clickable-row"
-                                  onClick={() => handleHoldingClick(hold)}
-                                  style={{ 
-                                    backgroundColor: isActive ? 'inherit' : 'rgba(243, 244, 246, 0.4)', 
-                                    opacity: isActive ? 1 : 0.85 
-                                  }}
-                                >
-                                  <td style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--color-primary)' }}>{hold.stock_code}</td>
-                                  <td style={{ fontWeight: 600 }}>{hold.stock_name}</td>
-                                  <td style={{ fontFamily: 'monospace' }}>{hold.entry_date}</td>
-                                  <td style={{ fontFamily: 'monospace' }}>{hold.exit_date || '-'}</td>
-                                  <td className="number-align" style={{ fontVariantNumeric: 'tabular-nums' }}>{hold.entry_price.toLocaleString()}</td>
-                                  <td className="number-align" style={{ fontVariantNumeric: 'tabular-nums' }}>
-                                    {isActive ? hold.current_price.toLocaleString() : (hold.exit_price?.toLocaleString() || '-')}
-                                  </td>
-                                  <td className={`number-align ${hold.holding_return >= 0 ? 'color-up' : 'color-down'}`} style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
-                                    {hold.holding_return >= 0 ? `+${hold.holding_return.toFixed(2)}%` : `${hold.holding_return.toFixed(2)}%`}
-                                  </td>
-                                  <td style={{ textAlign: 'center', fontWeight: 600, color: '#10b981' }}>{hold.score_at_entry ? `${Math.round(hold.score_at_entry)}점` : '-'}</td>
-                                  <td style={{ textAlign: 'center', fontWeight: 600, color: hold.score_at_exit ? '#ef4444' : 'var(--text-secondary)' }}>{hold.score_at_exit ? `${Math.round(hold.score_at_exit)}점` : '-'}</td>
-                                  <td style={{ textAlign: 'center' }}>
-                                    <span style={{ 
-                                      fontSize: '0.75rem', 
-                                      backgroundColor: isActive ? 'var(--color-primary-light)' : '#e5e7eb', 
-                                      color: isActive ? 'var(--color-primary)' : '#4b5563', 
-                                      padding: '0.2rem 0.5rem', 
-                                      borderRadius: '4px', 
-                                      fontWeight: 'bold' 
-                                    }}>
-                                      {isActive ? '보유중' : '청산완료'}
-                                    </span>
-                                  </td>
-                                </tr>
-                              );
-                            })
+                            <tr>
+                              <th style={{ width: '60px', textAlign: 'center' }}>순위</th>
+                              <th>종목코드</th>
+                              <th>종목명</th>
+                              <th className="hide-on-mobile">시장</th>
+                              <th className="hide-on-tablet">주요 업종</th>
+                              <th className="hide-on-mobile" style={{ textAlign: 'center' }}>안정성</th>
+                              <th className="hide-on-mobile" style={{ textAlign: 'center' }}>성장성</th>
+                              <th className="hide-on-mobile" style={{ textAlign: 'center' }}>저평가</th>
+                              <th className="hide-on-mobile" style={{ textAlign: 'center' }}>주주환원</th>
+                              <th className="hide-on-mobile" style={{ textAlign: 'center' }}>거버넌스</th>
+                              <th style={{ textAlign: 'center' }}>종합 점수</th>
+                              <th style={{ textAlign: 'center' }}>추천 여부</th>
+                            </tr>
                           )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  {/* 5. 거래 체결 내역 */}
-                  <div>
-                    <h3 className="section-title">📜 최근 거래 및 체결 이력</h3>
-                    <div className="financials-table-wrapper">
-                      <table className="stock-table">
-                        <thead>
-                          <tr>
-                            <th>체결시간</th>
-                            <th>종목코드</th>
-                            <th>종목명</th>
-                            <th style={{ textAlign: 'center' }}>구분</th>
-                            <th className="number-align">체결단가 (원)</th>
-                            <th className="number-align">체결수량 (주)</th>
-                            <th className="number-align">체결금액 (원)</th>
-                            <th style={{ textAlign: 'center' }}>체결 시 점수</th>
-                          </tr>
                         </thead>
                         <tbody>
-                          {portfolioTransactions.length === 0 ? (
-                            <tr>
-                              <td colSpan={8} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
-                                체결된 가상 투자 거래 내역이 존재하지 않습니다.
-                              </td>
-                            </tr>
-                          ) : (
-                            portfolioTransactions.map((tx) => (
-                              <tr key={tx.id}>
-                                <td style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{tx.created_at}</td>
-                                <td style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--color-primary)' }}>{tx.stock_code}</td>
-                                <td style={{ fontWeight: 600 }}>{tx.stock_name}</td>
-                                <td style={{ textAlign: 'center' }}>
-                                  <span style={{ 
-                                    fontSize: '0.75rem', 
-                                    backgroundColor: tx.transaction_type === 'BUY' ? 'rgba(225, 29, 72, 0.1)' : 'rgba(37, 99, 235, 0.1)', 
-                                    color: tx.transaction_type === 'BUY' ? 'var(--color-primary)' : 'var(--color-primary-dark)',
-                                    padding: '0.2rem 0.5rem', 
-                                    borderRadius: '4px', 
-                                    fontWeight: 'bold' 
-                                  }}>
-                                    {tx.transaction_type === 'BUY' ? '매수' : '매도'}
+                          {rankedStocks.map((stock, index) => {
+                            const rank = (rankedPage - 1) * 15 + index + 1;
+                            const isHigh = (stock.total_score || 0) >= 70;
+                            const isMid = (stock.total_score || 0) >= 60 && (stock.total_score || 0) < 70;
+                            const scoreColor = isHigh ? '#10b981' : isMid ? '#f59e0b' : '#9ca3af';
+                            
+                            const fullStockItem: StockItem = {
+                              stock_code: stock.stock_code,
+                              stock_name: stock.stock_name,
+                              market: stock.market,
+                              sector: stock.sector || undefined,
+                              is_active: 1
+                            };
+
+                            return (
+                              <tr 
+                                key={stock.stock_code} 
+                                className="clickable-row" 
+                                onClick={() => handleStockClick(fullStockItem)}
+                              >
+                                <td style={{ textAlign: 'center', fontWeight: 700, color: rank <= 3 ? 'var(--color-primary)' : 'var(--text-secondary)' }}>
+                                  {rank}
+                                </td>
+                                <td style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--color-primary)' }}>
+                                  {stock.stock_code}
+                                </td>
+                                <td style={{ fontWeight: 600 }}>{stock.stock_name}</td>
+                                <td className="hide-on-mobile">
+                                  <span className={`market-badge ${stock.market.toLowerCase()}`}>
+                                    {stock.market}
                                   </span>
                                 </td>
-                                <td className="number-align" style={{ fontVariantNumeric: 'tabular-nums' }}>{tx.price.toLocaleString()}</td>
-                                <td className="number-align" style={{ fontVariantNumeric: 'tabular-nums' }}>{tx.quantity.toLocaleString()}</td>
-                                <td className="number-align" style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 500 }}>{tx.amount.toLocaleString()}</td>
-                                <td style={{ textAlign: 'center', color: 'var(--text-secondary)', fontWeight: 500 }}>{tx.score ? `${Math.round(tx.score)}점` : '-'}</td>
+                                <td className="hide-on-tablet" style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>{stock.sector || '-'}</td>
+                                <td className="hide-on-mobile" style={{ textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>
+                                  {stock.financial_stability_score !== null && stock.financial_stability_score !== undefined ? `${stock.financial_stability_score}점` : '-'}
+                                </td>
+                                <td className="hide-on-mobile" style={{ textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>
+                                  {stock.growth_score !== null && stock.growth_score !== undefined ? `${stock.growth_score}점` : '-'}
+                                </td>
+                                <td className="hide-on-mobile" style={{ textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>
+                                  {stock.undervaluation_score !== null && stock.undervaluation_score !== undefined ? `${stock.undervaluation_score}점` : '-'}
+                                </td>
+                                <td className="hide-on-mobile" style={{ textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>
+                                  {stock.shareholder_return_score !== null && stock.shareholder_return_score !== undefined ? `${stock.shareholder_return_score}점` : '-'}
+                                </td>
+                                <td className="hide-on-mobile" style={{ textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>
+                                  {stock.market_governance_score !== null && stock.market_governance_score !== undefined ? `${stock.market_governance_score}점` : '-'}
+                                </td>
+                                <td style={{ textAlign: 'center', fontWeight: 700, color: scoreColor, fontSize: '1.05rem' }}>
+                                  {stock.total_score !== null && stock.total_score !== undefined ? `${stock.total_score}점` : '-'}
+                                </td>
+                                <td style={{ textAlign: 'center' }}>
+                                  {stock.is_candidate === 1 ? (
+                                    <span style={{ fontSize: '0.75rem', backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)', padding: '0.25rem 0.5rem', borderRadius: '4px', fontWeight: 600 }}>
+                                      🌟 추천
+                                    </span>
+                                  ) : (
+                                    <span style={{ fontSize: '0.75rem', backgroundColor: '#f3f4f6', color: '#9ca3af', padding: '0.25rem 0.5rem', borderRadius: '4px', fontWeight: 500 }}>
+                                      제외
+                                    </span>
+                                  )}
+                                </td>
                               </tr>
-                            ))
-                          )}
+                            );
+                          })}
                         </tbody>
                       </table>
+
+                      {/* Paging component */}
+                      <div className="pagination-container">
+                        <div className="pagination-info">
+                          총 <strong>{rankedTotal.toLocaleString()}</strong>개 중 <strong>{(rankedPage - 1) * 15 + 1} - {Math.min(rankedPage * 15, rankedTotal)}</strong>번째 표시 중
+                        </div>
+                        <div className="pagination-buttons">
+                          <button 
+                            className="page-btn" 
+                            onClick={() => setRankedPage(1)} 
+                            disabled={rankedPage === 1}
+                          >
+                            맨앞
+                          </button>
+                          <button 
+                            className="page-btn" 
+                            onClick={() => setRankedPage(p => Math.max(1, p - 1))} 
+                            disabled={rankedPage === 1}
+                          >
+                            이전
+                          </button>
+                          
+                          {Array.from({ length: Math.min(5, rankedPages) }, (_, i) => {
+                            let pageNum = rankedPage;
+                            if (rankedPage <= 3) {
+                              pageNum = i + 1;
+                            } else if (rankedPage > rankedPages - 2) {
+                              pageNum = rankedPages - 4 + i;
+                            } else {
+                              pageNum = rankedPage - 2 + i;
+                            }
+                            if (pageNum < 1 || pageNum > rankedPages) return null;
+                            
+                            return (
+                              <button 
+                                key={pageNum}
+                                className={`page-btn ${rankedPage === pageNum ? 'active' : ''}`}
+                                onClick={() => setRankedPage(pageNum)}
+                              >
+                                {pageNum}
+                              </button>
+                            );
+                          })}
+
+                          <button 
+                            className="page-btn" 
+                            onClick={() => setRankedPage(p => Math.min(rankedPages, p + 1))} 
+                            disabled={rankedPage === rankedPages}
+                          >
+                            다음
+                          </button>
+                          <button 
+                            className="page-btn" 
+                            onClick={() => setRankedPage(rankedPages)} 
+                            disabled={rankedPage === rankedPages}
+                          >
+                            맨뒤
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </section>
+              </>
+            )}
+
+            {subTab === 'portfolio' && (
+              <>
+                <header className="header-section">
+                  <div className="header-title">
+                    <h1>가상 투자 시뮬레이션 ({activeTab === 'growth' ? '기회형 초성장주 전략' : '저평가 배당주 전략'})</h1>
+                    <p>
+                      {activeTab === 'growth' 
+                        ? '성장성, 마진 효율성 및 PEG 가성비 점수 70점 이상인 종목에 진입하여 보유하고, 60점 미만으로 하락 시 매도하는 전략의 가상 포트폴리오를 운용합니다.' 
+                        : '배당주 분석 점수 70점 이상인 종목에 진입하여 보유하고, 60점 미만으로 하락 시 매도하는 전략의 가상 포트폴리오를 운용합니다.'}
+                    </p>
+                  </div>
+                </header>
+
+                {loadingPortfolio ? (
+                  <div className="loading-wrapper" style={{ minHeight: '300px' }}>
+                    <div className="spinner"></div>
+                    <p>가상 투자 데이터를 불러오는 중입니다...</p>
+                  </div>
+                ) : errorPortfolio ? (
+                  <div className="error-card" style={{ margin: '2rem auto', maxWidth: '450px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--color-danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                    <p style={{ fontWeight: 600, color: 'var(--text-primary)', marginTop: '0.75rem', marginBottom: '0.75rem' }}>{errorPortfolio}</p>
+                    <button className="back-btn" style={{ padding: '0.4rem 1.2rem', fontSize: '0.85rem' }} onClick={fetchPortfolioData}>
+                      다시 시도
+                    </button>
+                  </div>
+                ) : portfolioSummary === null ? (
+                  <div className="controls-card" style={{ padding: '3rem', textAlign: 'center', maxWidth: '600px', margin: '2rem auto' }}>
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: '1.5rem' }}><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+                    <h3 style={{ marginBottom: '1rem', color: 'var(--text-primary)' }}>가상 투자 포트폴리오를 시작해보세요</h3>
+                    <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem', fontSize: '0.95rem', lineHeight: '1.6' }}>
+                      초기 자금을 설정하고 아래 버튼을 클릭하면, 가장 최신의 데이터 기준으로 70점 이상인 종목에 분산 투자를 최초 진입하여 가상 운용을 기동합니다.
+                    </p>
+                    <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', alignItems: 'center' }}>
+                      <div style={{ position: 'relative', width: '220px' }}>
+                        <input
+                          type="text"
+                          className="search-input"
+                          style={{ paddingLeft: '1rem', fontSize: '1.05rem', fontWeight: 600, textAlign: 'right', paddingRight: '2.5rem' }}
+                          value={initialBalanceInput}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(/[^0-9]/g, '');
+                            setInitialBalanceInput(val ? Number(val).toLocaleString() : '');
+                          }}
+                        />
+                        <span style={{ position: 'absolute', right: '1rem', top: '50%', transform: 'translateY(-50%)', fontWeight: 600, color: 'var(--text-secondary)' }}>원</span>
+                      </div>
+                      <button 
+                        className="sync-btn evaluate-btn" 
+                        style={{ padding: '0.75rem 2rem', fontSize: '0.95rem', background: 'linear-gradient(135deg, var(--color-primary), #4f46e5)' }}
+                        onClick={handleInitializePortfolio}
+                        disabled={initializingPortfolio}
+                      >
+                        {initializingPortfolio ? "포트폴리오 생성 중..." : "가상 투자 시작하기"}
+                      </button>
                     </div>
                   </div>
-                </div>
+                ) : (
+                  <>
+                    {/* 1. 요약 카드 위젯 */}
+                    <section className="summary-grid">
+                      <div className="summary-card">
+                        <span className="card-title">모의지수 자산액</span>
+                        <span className="card-value" style={{ color: 'var(--text-primary)' }}>{formatWon(portfolioSummary.total_asset)}</span>
+                      </div>
+                      <div className="summary-card">
+                        <span className="card-title">진행 중인 종목 수</span>
+                        <span className="card-value" style={{ color: 'var(--text-secondary)' }}>
+                          {portfolioHoldings.filter(h => h.status === 'ACTIVE').length}개
+                        </span>
+                      </div>
+                      <div className="summary-card">
+                        <span className="card-title">지수 누적 수익률</span>
+                        <span className={`card-value ${portfolioSummary.total_return >= 0 ? 'color-up' : 'color-down'}`}>
+                          {portfolioSummary.total_return >= 0 ? `+${portfolioSummary.total_return.toFixed(2)}%` : `${portfolioSummary.total_return.toFixed(2)}%`}
+                        </span>
+                      </div>
+                      <div className="summary-card">
+                        <span className="card-title">최대 낙폭 (MDD)</span>
+                        <span className="card-value" style={{ color: 'var(--color-danger)' }}>-{portfolioSummary.mdd.toFixed(2)}%</span>
+                      </div>
+                      <div className="summary-card">
+                        <span className="card-title">완료 거래 승률</span>
+                        <span className="card-value" style={{ color: '#059669' }}>{portfolioSummary.win_rate.toFixed(1)}%</span>
+                      </div>
+                    </section>
+
+                    {/* 2. 제어 컨트롤러 */}
+                    <section className="controls-card" style={{ padding: '1.25rem 2rem', marginBottom: '1.5rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
+                        <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                          최종 업데이트 시점: <strong>{portfolioSummary.updated_at}</strong>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                          <button 
+                            className={`sync-btn financial-sync-btn ${updatingPortfolio ? 'loading' : ''}`}
+                            style={{ padding: '0.5rem 1.25rem', fontSize: '0.9rem', display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
+                            onClick={handleUpdatePortfolio}
+                            disabled={updatingPortfolio || initializingPortfolio}
+                          >
+                            <svg className="sync-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                            {updatingPortfolio ? "포트폴리오 업데이트 중..." : "오늘 포트폴리오 업데이트"}
+                          </button>
+                          <button 
+                            className="reset-db-btn"
+                            style={{ padding: '0.5rem 1.25rem', fontSize: '0.9rem', width: 'auto', margin: 0 }}
+                            onClick={handleInitializePortfolio}
+                            disabled={initializingPortfolio || updatingPortfolio}
+                          >
+                            초기화 및 재설정
+                          </button>
+                        </div>
+                      </div>
+                    </section>
+
+                    {/* 3. 자산 성장 추이 차트 */}
+                    <PortfolioChart history={portfolioHistory} />
+
+                    <div className="detail-section" style={{ marginTop: '1.5rem' }}>
+                      {/* 4. 현재 보유 종목 리스트 */}
+                      <div>
+                        <h3 className="section-title">💼 가상 투자 종목 기록 및 수익률 현황 (수익률 순)</h3>
+                        <div className="financials-table-wrapper">
+                          <table className="stock-table">
+                            <thead>
+                              <tr>
+                                <th>종목코드</th>
+                                <th>종목명</th>
+                                <th>진입일자</th>
+                                <th>청산일자</th>
+                                <th className="number-align">진입가격 (원)</th>
+                                <th className="number-align">현재/청산가격 (원)</th>
+                                <th className="number-align">수익률</th>
+                                <th style={{ textAlign: 'center' }}>진입 점수</th>
+                                <th style={{ textAlign: 'center' }}>청산 점수</th>
+                                <th style={{ textAlign: 'center' }}>상태</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {portfolioHoldings.length === 0 ? (
+                                <tr>
+                                  <td colSpan={10} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
+                                    가상 투자 종목 기록이 없습니다.
+                                  </td>
+                                </tr>
+                              ) : (
+                                portfolioHoldings.map((hold, idx) => {
+                                  const isActive = hold.status === 'ACTIVE';
+                                  return (
+                                    <tr 
+                                      key={`${hold.stock_code}-${hold.entry_date}-${idx}`}
+                                      className="clickable-row"
+                                      onClick={() => handleHoldingClick(hold)}
+                                      style={{ 
+                                        backgroundColor: isActive ? 'inherit' : 'rgba(243, 244, 246, 0.4)', 
+                                        opacity: isActive ? 1 : 0.85 
+                                      }}
+                                    >
+                                      <td style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--color-primary)' }}>{hold.stock_code}</td>
+                                      <td style={{ fontWeight: 600 }}>{hold.stock_name}</td>
+                                      <td style={{ fontFamily: 'monospace' }}>{hold.entry_date}</td>
+                                      <td style={{ fontFamily: 'monospace' }}>{hold.exit_date || '-'}</td>
+                                      <td className="number-align" style={{ fontVariantNumeric: 'tabular-nums' }}>{hold.entry_price.toLocaleString()}</td>
+                                      <td className="number-align" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                                        {isActive ? hold.current_price.toLocaleString() : (hold.exit_price?.toLocaleString() || '-')}
+                                      </td>
+                                      <td className={`number-align ${hold.holding_return >= 0 ? 'color-up' : 'color-down'}`} style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
+                                        {hold.holding_return >= 0 ? `+${hold.holding_return.toFixed(2)}%` : `${hold.holding_return.toFixed(2)}%`}
+                                      </td>
+                                      <td style={{ textAlign: 'center', fontWeight: 600, color: '#10b981' }}>{hold.score_at_entry ? `${Math.round(hold.score_at_entry)}점` : '-'}</td>
+                                      <td style={{ textAlign: 'center', fontWeight: 600, color: hold.score_at_exit ? '#ef4444' : 'var(--text-secondary)' }}>{hold.score_at_exit ? `${Math.round(hold.score_at_exit)}점` : '-'}</td>
+                                      <td style={{ textAlign: 'center' }}>
+                                        <span style={{ 
+                                          fontSize: '0.75rem', 
+                                          backgroundColor: isActive ? 'var(--color-primary-light)' : '#e5e7eb', 
+                                          color: isActive ? 'var(--color-primary)' : '#4b5563', 
+                                          padding: '0.2rem 0.5rem', 
+                                          borderRadius: '4px', 
+                                          fontWeight: 'bold' 
+                                        }}>
+                                          {isActive ? '보유중' : '청산완료'}
+                                        </span>
+                                      </td>
+                                    </tr>
+                                  );
+                                })
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* 5. 거래 체결 내역 */}
+                      <div>
+                        <h3 className="section-title">📜 최근 거래 및 체결 이력</h3>
+                        <div className="financials-table-wrapper">
+                          <table className="stock-table">
+                            <thead>
+                              <tr>
+                                <th>체결시간</th>
+                                <th>종목코드</th>
+                                <th>종목명</th>
+                                <th style={{ textAlign: 'center' }}>구분</th>
+                                <th className="number-align">체결단가 (원)</th>
+                                <th className="number-align">체결수량 (주)</th>
+                                <th className="number-align">체결금액 (원)</th>
+                                <th style={{ textAlign: 'center' }}>체결 시 점수</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {portfolioTransactions.length === 0 ? (
+                                <tr>
+                                  <td colSpan={8} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
+                                    체결된 가상 투자 거래 내역이 존재하지 않습니다.
+                                  </td>
+                                </tr>
+                              ) : (
+                                portfolioTransactions.map((tx) => (
+                                  <tr key={tx.id}>
+                                    <td style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{tx.created_at}</td>
+                                    <td style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--color-primary)' }}>{tx.stock_code}</td>
+                                    <td style={{ fontWeight: 600 }}>{tx.stock_name}</td>
+                                    <td style={{ textAlign: 'center' }}>
+                                      <span style={{ 
+                                        fontSize: '0.75rem', 
+                                        backgroundColor: tx.transaction_type === 'BUY' ? 'rgba(225, 29, 72, 0.1)' : 'rgba(37, 99, 235, 0.1)', 
+                                        color: tx.transaction_type === 'BUY' ? 'var(--color-primary)' : 'var(--color-primary-dark)',
+                                        padding: '0.2rem 0.5rem', 
+                                        borderRadius: '4px', 
+                                        fontWeight: 'bold' 
+                                      }}>
+                                        {tx.transaction_type === 'BUY' ? '매수' : '매도'}
+                                      </span>
+                                    </td>
+                                    <td className="number-align" style={{ fontVariantNumeric: 'tabular-nums' }}>{tx.price.toLocaleString()}</td>
+                                    <td className="number-align" style={{ fontVariantNumeric: 'tabular-nums' }}>{tx.quantity.toLocaleString()}</td>
+                                    <td className="number-align" style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 500 }}>{tx.amount.toLocaleString()}</td>
+                                    <td style={{ textAlign: 'center', color: 'var(--text-secondary)', fontWeight: 500 }}>{tx.score ? `${Math.round(tx.score)}점` : '-'}</td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
               </>
             )}
           </>
@@ -2436,6 +2632,7 @@ function App() {
       {showDetailsModal && evaluation && (
         <ScoreDetailsOverlay 
           evaluation={evaluation} 
+          financials={financials}
           onClose={() => setShowDetailsModal(false)} 
         />
       )}
@@ -2448,16 +2645,19 @@ function App() {
 // ----------------------------------------------------
 interface ScoreDetailsOverlayProps {
   evaluation: StockEvaluationItem;
+  financials: FinancialReportItem[];
   onClose: () => void;
 }
 
-function ScoreDetailsOverlay({ evaluation, onClose }: ScoreDetailsOverlayProps) {
+function ScoreDetailsOverlay({ evaluation, financials, onClose }: ScoreDetailsOverlayProps) {
   // Helper to ensure values are safe numbers
   const safeNum = (v: any): number | null => {
     if (v === undefined || v === null || v === '') return null;
     const n = Number(v);
     return isNaN(n) ? null : n;
   };
+
+  const isGrowth = evaluation.strategy_type === 'GROWTH';
 
   const debtVal = safeNum(evaluation.debt_ratio);
   const currentVal = safeNum(evaluation.current_ratio);
@@ -2473,47 +2673,85 @@ function ScoreDetailsOverlay({ evaluation, onClose }: ScoreDetailsOverlayProps) 
   // 1. 재무 안정성 점수 세부 연산
   const getDebtRatioScore = (val: number | null) => {
     if (val === null) return { score: 0, desc: "데이터 없음 (0점)" };
-    if (val <= 50) return { score: 8, desc: `${val.toFixed(2)}% ≤ 50% (8점 만점)` };
-    if (val <= 100) return { score: 6, desc: `${val.toFixed(2)}% ≤ 100% (6점)` };
-    if (val <= 200) return { score: 4, desc: `${val.toFixed(2)}% ≤ 200% (4점)` };
-    if (val <= 400) return { score: 2, desc: `${val.toFixed(2)}% ≤ 400% (2점)` };
-    return { score: 0, desc: `${val.toFixed(2)}% > 400% 초과 (0점)` };
+    if (isGrowth) {
+      if (val <= 100) return { score: 8, desc: `${val.toFixed(2)}% ≤ 100% (8점 만점)` };
+      if (val <= 150) return { score: 5, desc: `${val.toFixed(2)}% ≤ 150% (5점)` };
+      if (val <= 250) return { score: 2, desc: `${val.toFixed(2)}% ≤ 250% (2점)` };
+      return { score: 0, desc: `${val.toFixed(2)}% > 250% 초과 (0점)` };
+    } else {
+      if (val <= 50) return { score: 8, desc: `${val.toFixed(2)}% ≤ 50% (8점 만점)` };
+      if (val <= 100) return { score: 6, desc: `${val.toFixed(2)}% ≤ 100% (6점)` };
+      if (val <= 200) return { score: 4, desc: `${val.toFixed(2)}% ≤ 200% (4점)` };
+      if (val <= 400) return { score: 2, desc: `${val.toFixed(2)}% ≤ 400% (2점)` };
+      return { score: 0, desc: `${val.toFixed(2)}% > 400% 초과 (0점)` };
+    }
   };
 
   const getCurrentRatioScore = (val: number | null) => {
     if (val === null) return { score: 0, desc: "데이터 없음 (0점)" };
-    if (val >= 200) return { score: 7, desc: `${val.toFixed(2)}% ≥ 200% (7점 만점)` };
-    if (val >= 150) return { score: 5, desc: `${val.toFixed(2)}% ≥ 150% (5점)` };
-    if (val >= 100) return { score: 3, desc: `${val.toFixed(2)}% ≥ 100% (3점)` };
-    return { score: 0, desc: `${val.toFixed(2)}% < 100% 미만 (0점)` };
+    if (isGrowth) {
+      if (val >= 150) return { score: 7, desc: `${val.toFixed(2)}% ≥ 150% (7점 만점)` };
+      if (val >= 100) return { score: 4, desc: `${val.toFixed(2)}% ≥ 100% (4점)` };
+      if (val >= 70) return { score: 2, desc: `${val.toFixed(2)}% ≥ 70% (2점)` };
+      return { score: 0, desc: `${val.toFixed(2)}% < 70% 미만 (0점)` };
+    } else {
+      if (val >= 200) return { score: 7, desc: `${val.toFixed(2)}% ≥ 200% (7점 만점)` };
+      if (val >= 150) return { score: 5, desc: `${val.toFixed(2)}% ≥ 150% (5점)` };
+      if (val >= 100) return { score: 3, desc: `${val.toFixed(2)}% ≥ 100% (3점)` };
+      return { score: 0, desc: `${val.toFixed(2)}% < 100% 미만 (0점)` };
+    }
   };
 
   // 2. 성장성 점수 세부 연산
   const getRevenueGrowthScore = (val: number | null) => {
     if (val === null) return { score: 0, desc: "데이터 없음 (0점)" };
-    if (val >= 10) return { score: 5, desc: `${val.toFixed(2)}% ≥ 10% (5점 만점)` };
-    if (val >= 5) return { score: 4, desc: `${val.toFixed(2)}% ≥ 5% (4점)` };
-    if (val >= 0) return { score: 2, desc: `${val.toFixed(2)}% ≥ 0% (2점)` };
-    return { score: 0, desc: `${val.toFixed(2)}% < 0% 역성장 (0점)` };
+    if (isGrowth) {
+      if (val >= 30) return { score: 15, desc: `${val.toFixed(2)}% ≥ 30% (15점 만점)` };
+      if (val >= 15) return { score: 10, desc: `${val.toFixed(2)}% ≥ 15% (10점)` };
+      if (val >= 5) return { score: 5, desc: `${val.toFixed(2)}% ≥ 5% (5점)` };
+      if (val >= 0) return { score: 2, desc: `${val.toFixed(2)}% ≥ 0% (2점)` };
+      return { score: 0, desc: `${val.toFixed(2)}% < 0% 역성장 (0점)` };
+    } else {
+      if (val >= 10) return { score: 5, desc: `${val.toFixed(2)}% ≥ 10% (5점 만점)` };
+      if (val >= 5) return { score: 4, desc: `${val.toFixed(2)}% ≥ 5% (4점)` };
+      if (val >= 0) return { score: 2, desc: `${val.toFixed(2)}% ≥ 0% (2점)` };
+      return { score: 0, desc: `${val.toFixed(2)}% < 0% 역성장 (0점)` };
+    }
   };
 
   const getOperatingIncomeGrowthScore = (val: number | null) => {
     if (val === null) return { score: 0, desc: "데이터 없음 (0점)" };
-    if (val >= 15) return { score: 5, desc: `${val.toFixed(2)}% ≥ 15% (5점 만점)` };
-    if (val >= 5) return { score: 4, desc: `${val.toFixed(2)}% ≥ 5% (4점)` };
-    if (val >= 0) return { score: 2, desc: `${val.toFixed(2)}% ≥ 0% (2점)` };
-    return { score: 0, desc: `${val.toFixed(2)}% < 0% 역성장 (0점)` };
+    if (isGrowth) {
+      if (val >= 40) return { score: 10, desc: `${val.toFixed(2)}% ≥ 40% (10점 만점)` };
+      if (val >= 20) return { score: 7, desc: `${val.toFixed(2)}% ≥ 20% (7점)` };
+      if (val >= 5) return { score: 4, desc: `${val.toFixed(2)}% ≥ 5% (4점)` };
+      if (val >= 0) return { score: 2, desc: `${val.toFixed(2)}% ≥ 0% (2점)` };
+      return { score: 0, desc: `${val.toFixed(2)}% < 0% 역성장 (0점)` };
+    } else {
+      if (val >= 15) return { score: 5, desc: `${val.toFixed(2)}% ≥ 15% (5점 만점)` };
+      if (val >= 5) return { score: 4, desc: `${val.toFixed(2)}% ≥ 5% (4점)` };
+      if (val >= 0) return { score: 2, desc: `${val.toFixed(2)}% ≥ 0% (2점)` };
+      return { score: 0, desc: `${val.toFixed(2)}% < 0% 역성장 (0점)` };
+    }
   };
 
   const getEpsGrowthScore = (val: number | null) => {
     if (val === null) return { score: 0, desc: "데이터 없음 (0점)" };
-    if (val >= 15) return { score: 5, desc: `${val.toFixed(2)}% ≥ 15% (5점 만점)` };
-    if (val >= 5) return { score: 4, desc: `${val.toFixed(2)}% ≥ 5% (4점)` };
-    if (val >= 0) return { score: 2, desc: `${val.toFixed(2)}% ≥ 0% (2점)` };
-    return { score: 0, desc: `${val.toFixed(2)}% < 0% 역성장 (0점)` };
+    if (isGrowth) {
+      if (val >= 40) return { score: 10, desc: `${val.toFixed(2)}% ≥ 40% (10점 만점)` };
+      if (val >= 20) return { score: 7, desc: `${val.toFixed(2)}% ≥ 20% (7점)` };
+      if (val >= 5) return { score: 4, desc: `${val.toFixed(2)}% ≥ 5% (4점)` };
+      if (val >= 0) return { score: 2, desc: `${val.toFixed(2)}% ≥ 0% (2점)` };
+      return { score: 0, desc: `${val.toFixed(2)}% < 0% 역성장 (0점)` };
+    } else {
+      if (val >= 15) return { score: 5, desc: `${val.toFixed(2)}% ≥ 15% (5점 만점)` };
+      if (val >= 5) return { score: 4, desc: `${val.toFixed(2)}% ≥ 5% (4점)` };
+      if (val >= 0) return { score: 2, desc: `${val.toFixed(2)}% ≥ 0% (2점)` };
+      return { score: 0, desc: `${val.toFixed(2)}% < 0% 역성장 (0점)` };
+    }
   };
 
-  // 3. 저평가 점수 세부 연산
+  // 3. 저평가 / 효율성 점수 세부 연산
   const getPerScore = (val: number | null) => {
     if (val === null || val <= 0) return { score: 0, desc: "데이터 없음/적자 (0점)" };
     if (val <= 6) return { score: 15, desc: `${val.toFixed(2)}배 ≤ 6배 (15점 만점)` };
@@ -2532,13 +2770,44 @@ function ScoreDetailsOverlay({ evaluation, onClose }: ScoreDetailsOverlayProps) 
     return { score: 0, desc: `${val.toFixed(2)}배 > 2.5배 (0점)` };
   };
 
-  // 4. 주주환원 점수 세부 연산
+  const getRoeScore = (val: number | null) => {
+    if (val === null) return { score: 0, desc: "데이터 없음 (0점)" };
+    if (val >= 25) return { score: 15, desc: `${val.toFixed(2)}% ≥ 25% (15점 만점)` };
+    if (val >= 15) return { score: 12, desc: `${val.toFixed(2)}% ≥ 15% (12점)` };
+    if (val >= 10) return { score: 8, desc: `${val.toFixed(2)}% ≥ 10% (8점)` };
+    if (val >= 5) return { score: 4, desc: `${val.toFixed(2)}% ≥ 5% (4점)` };
+    return { score: 0, desc: `${val.toFixed(2)}% < 5% 미만 (0점)` };
+  };
+
+  const getOpMarginScore = (val: number | null) => {
+    if (val === null) return { score: 0, desc: "데이터 없음 (0점)" };
+    if (val >= 20) return { score: 10, desc: `${val.toFixed(2)}% ≥ 20% (10점 만점)` };
+    if (val >= 10) return { score: 7, desc: `${val.toFixed(2)}% ≥ 10% (7점)` };
+    if (val >= 5) return { score: 4, desc: `${val.toFixed(2)}% ≥ 5% (4점)` };
+    if (val >= 2) return { score: 2, desc: `${val.toFixed(2)}% ≥ 2% (2점)` };
+    return { score: 0, desc: `${val.toFixed(2)}% < 2% 미만 (0점)` };
+  };
+
+  // 4. 주주환원 / 재투자 점수 세부 연산
   const getPayoutScore = (val: number | null) => {
     if (val === null || val <= 0) return { score: 0, desc: "데이터 없음 (0점)" };
-    const pct = val; // API에서 이미 백분율(%) 수치로 제공됨
+    const pct = val; 
     if (pct >= 20 && pct <= 60) return { score: 15, desc: `${pct.toFixed(2)}% (20% ~ 60% 최적 구간, 15점 만점)` };
     if (pct >= 10 && pct <= 80) return { score: 10, desc: `${pct.toFixed(2)}% (10% ~ 80% 완만 구간, 10점)` };
     return { score: 5, desc: `${pct.toFixed(2)}% (소극 환원 혹은 무리한 배당, 5점)` };
+  };
+
+  const getPayoutReinvestScore = (val: number | null) => {
+    if (val === null || val <= 0) return { score: 10, desc: "배당 없음/소극 배당 (10점 만점, 전액 사내유보 재투자)" };
+    if (val <= 30) return { score: 10, desc: `${val.toFixed(2)}% ≤ 30% (10점 만점)` };
+    if (val <= 50) return { score: 5, desc: `${val.toFixed(2)}% ≤ 50% (5점)` };
+    if (val <= 80) return { score: 2, desc: `${val.toFixed(2)}% ≤ 80% (2점)` };
+    return { score: 0, desc: `${val.toFixed(2)}% > 80% 초과 (0점)` };
+  };
+
+  const getNetIncomePositiveScore = (val: number | null) => {
+    if (val === null || val <= 0) return { score: 0, desc: "적자 또는 데이터 없음 (0점)" };
+    return { score: 5, desc: "당기순이익 흑자 유지 (5점 만점)" };
   };
 
   const getDividendYearsScore = (val: number | null) => {
@@ -2549,6 +2818,18 @@ function ScoreDetailsOverlay({ evaluation, onClose }: ScoreDetailsOverlayProps) 
     return { score: 0, desc: "데이터 없음 (0점)" };
   };
 
+  // 5. PEG 가치 평가 점수
+  const getPegScore = (per: number | null, epsg: number | null) => {
+    if (per === null || epsg === null || per <= 0 || epsg <= 0) {
+      return { score: 1, desc: "PEG 계산 불가 또는 적자/역성장 (1점)" };
+    }
+    const peg = per / epsg;
+    if (peg <= 1.0) return { score: 10, desc: `PEG ${peg.toFixed(2)} ≤ 1.0 (10점 만점)` };
+    if (peg <= 1.5) return { score: 7, desc: `PEG ${peg.toFixed(2)} ≤ 1.5 (7점)` };
+    if (peg <= 2.5) return { score: 4, desc: `PEG ${peg.toFixed(2)} ≤ 2.5 (4점)` };
+    return { score: 1, desc: `PEG ${peg.toFixed(2)} > 2.5 초과 (1점)` };
+  };
+
   const debtInfo = getDebtRatioScore(debtVal);
   const currentInfo = getCurrentRatioScore(currentVal);
   const stabilitySum = Math.min(debtInfo.score + currentInfo.score, 15);
@@ -2556,28 +2837,48 @@ function ScoreDetailsOverlay({ evaluation, onClose }: ScoreDetailsOverlayProps) 
   const revInfo = getRevenueGrowthScore(revenueVal);
   const opInfo = getOperatingIncomeGrowthScore(opVal);
   const epsGrowthInfo = getEpsGrowthScore(epsVal);
-  const growthSum = Math.min(revInfo.score + opInfo.score + epsGrowthInfo.score, 15);
+  const growthSum = Math.min(revInfo.score + opInfo.score + epsGrowthInfo.score, isGrowth ? 35 : 15);
+
+  // Section 3: Undervaluation (DIVIDEND) vs Efficiency (GROWTH)
+  const roeVal = safeNum(evaluation.roe);
+  const latestFin = financials.find(f => f.bsns_year === evaluation.business_year);
+  const fRev = latestFin ? safeNum(latestFin.revenue) : null;
+  const fNetInc = latestFin ? safeNum(latestFin.net_income) : null;
+  const opMarginVal = (fRev && fRev > 0 && fNetInc) ? (fNetInc / fRev * 100) : 0;
 
   const perInfo = getPerScore(perVal);
   const pbrInfo = getPbrScore(pbrVal);
-  const valuationSum = Math.min(perInfo.score + pbrInfo.score, 25);
+  const roeInfo = getRoeScore(roeVal);
+  const opMarginInfo = getOpMarginScore(opMarginVal);
+  const valuationSum = isGrowth 
+    ? Math.min(roeInfo.score + opMarginInfo.score, 25)
+    : Math.min(perInfo.score + pbrInfo.score, 25);
 
+  // Section 4: Shareholder Return (DIVIDEND) vs Reinvestment (GROWTH)
   const payoutInfo = getPayoutScore(payoutVal);
+  const reinvestPayoutInfo = getPayoutReinvestScore(payoutVal);
+  const netIncPositiveInfo = getNetIncomePositiveScore(safeNum(evaluation.net_income));
   const divYearsInfo = getDividendYearsScore(divYearsVal);
   const decreasePenalty = Math.min(decreaseCountVal * 5, 15);
-  const shareholderSum = Math.max(Math.min(payoutInfo.score + divYearsInfo.score - decreasePenalty, 25), 0);
+
+  const shareholderSum = isGrowth
+    ? Math.min(reinvestPayoutInfo.score + netIncPositiveInfo.score, 15)
+    : Math.max(Math.min(payoutInfo.score + divYearsInfo.score - decreasePenalty, 25), 0);
+
+  // Section 5: Governance (DIVIDEND) vs PEG (GROWTH)
+  const pegInfo = getPegScore(perVal, epsVal);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>📊 상세 투자 점수 산출 내역서</h2>
+          <h2>📊 상세 투자 점수 산출 내역서 ({isGrowth ? '기회형 초성장주' : '안정 배당주'})</h2>
           <button className="modal-close-btn" onClick={onClose}>&times;</button>
         </div>
 
         <div className="modal-body">
           <p className="modal-desc">
-            현재 <strong>100점 만점 5대 투자 분석 모델</strong>을 기준으로 계산된 부문별 세부 취득 점수와 평가 대조 내역입니다.
+            현재 <strong>100점 만점 5대 투자 분석 모델 ({isGrowth ? '초성장주 전략' : '배당주 전략'})</strong>을 기준으로 계산된 부문별 세부 취득 점수와 평가 대조 내역입니다.
           </p>
 
           <div className="breakdown-grid">
@@ -2603,85 +2904,147 @@ function ScoreDetailsOverlay({ evaluation, onClose }: ScoreDetailsOverlayProps) 
             <div className="breakdown-section">
               <div className="section-header color-growth">
                 <span>② 본업 지속 성장성</span>
-                <span className="section-total">{growthSum} / 15점</span>
+                <span className="section-total">{growthSum} / {isGrowth ? 35 : 15}점</span>
               </div>
               <div className="section-body">
                 <div className="indicator-row">
-                  <span className="ind-name">매출액 성장률 (배점 5점)</span>
+                  <span className="ind-name">매출액 성장률 (배점 {isGrowth ? 15 : 5}점)</span>
                   <span className="ind-val">{revInfo.desc}</span>
                 </div>
                 <div className="indicator-row">
-                  <span className="ind-name">영업이익 성장률 (배점 5점)</span>
+                  <span className="ind-name">영업이익 성장률 (배점 {isGrowth ? 10 : 5}점)</span>
                   <span className="ind-val">{opInfo.desc}</span>
                 </div>
                 <div className="indicator-row">
-                  <span className="ind-name">EPS 성장률 (배점 5점)</span>
+                  <span className="ind-name">EPS 성장률 (배점 {isGrowth ? 10 : 5}점)</span>
                   <span className="ind-val">{epsGrowthInfo.desc}</span>
                 </div>
               </div>
             </div>
 
-            {/* 부문 3: 저평가 */}
+            {/* 부문 3: 저평가 / 효율성 */}
             <div className="breakdown-section">
-              <div className="section-header color-undervaluation">
-                <span>③ 가격 매력도 및 저평가 (밸류에이션)</span>
-                <span className="section-total">{valuationSum} / 25점</span>
-              </div>
-              <div className="section-body">
-                <div className="indicator-row">
-                  <span className="ind-name">PER (배점 15점)</span>
-                  <span className="ind-val">{perInfo.desc}</span>
-                </div>
-                <div className="indicator-row">
-                  <span className="ind-name">PBR (배점 15점)</span>
-                  <span className="ind-val">{pbrInfo.desc}</span>
-                </div>
-                <div className="indicator-footer">
-                  * PER과 PBR 점수의 합계에 25점 상한 캡(Cap)을 적용합니다. (합산: {perInfo.score + pbrInfo.score}점)
-                </div>
-              </div>
-            </div>
-
-            {/* 부문 4: 주주환원 */}
-            <div className="breakdown-section">
-              <div className="section-header color-return">
-                <span>④ 주주 환원 및 배당 매력</span>
-                <span className="section-total">{shareholderSum} / 25점</span>
-              </div>
-              <div className="section-body">
-                <div className="indicator-row">
-                  <span className="ind-name">배당 성향 (배점 15점)</span>
-                  <span className="ind-val">{payoutInfo.desc}</span>
-                </div>
-                <div className="indicator-row">
-                  <span className="ind-name">배당 지속 연수 (배점 15점)</span>
-                  <span className="ind-val">{divYearsInfo.desc}</span>
-                </div>
-                {decreasePenalty > 0 && (
-                  <div className="indicator-row penalty">
-                    <span className="ind-name">배당 삭감 이력 (감점)</span>
-                    <span className="ind-val" style={{ color: 'var(--color-danger)', fontWeight: 'bold' }}>
-                      -{decreasePenalty}점 감점 (삭감 횟수: {evaluation.dividend_decrease_count}회)
-                    </span>
+              {isGrowth ? (
+                <>
+                  <div className="section-header color-undervaluation">
+                    <span>③ 경영 마진 및 이익 효율성</span>
+                    <span className="section-total">{valuationSum} / 25점</span>
                   </div>
-                )}
-                <div className="indicator-footer">
-                  * (배당성향 + 배당지속 + 자사주가점 - 삭감감점)에 최소 0점 ~ 최대 25점 한도를 적용합니다.
-                </div>
-              </div>
+                  <div className="section-body">
+                    <div className="indicator-row">
+                      <span className="ind-name">ROE (배점 15점)</span>
+                      <span className="ind-val">{roeInfo.desc}</span>
+                    </div>
+                    <div className="indicator-row">
+                      <span className="ind-name">순이익률 (OM) (배점 10점)</span>
+                      <span className="ind-val">{opMarginInfo.desc}</span>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="section-header color-undervaluation">
+                    <span>③ 가격 매력도 및 저평가 (밸류에이션)</span>
+                    <span className="section-total">{valuationSum} / 25점</span>
+                  </div>
+                  <div className="section-body">
+                    <div className="indicator-row">
+                      <span className="ind-name">PER (배점 15점)</span>
+                      <span className="ind-val">{perInfo.desc}</span>
+                    </div>
+                    <div className="indicator-row">
+                      <span className="ind-name">PBR (배점 15점)</span>
+                      <span className="ind-val">{pbrInfo.desc}</span>
+                    </div>
+                    <div className="indicator-footer">
+                      * PER과 PBR 점수의 합계에 25점 상한 캡(Cap)을 적용합니다. (합산: {perInfo.score + pbrInfo.score}점)
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
 
-            {/* 부문 5: 거버넌스 */}
+            {/* 부문 4: 주주환원 / 재투자 */}
             <div className="breakdown-section">
-              <div className="section-header color-governance">
-                <span>⑤ 시장 및 지배구조 리스크 (거버넌스)</span>
-                <span className="section-total">0 / 20점</span>
-              </div>
-              <div className="section-body">
-                <div className="indicator-footer" style={{ marginTop: 0, fontSize: '0.85rem' }}>
-                  현재 거버넌스 지표는 1차 0점 고정 상태입니다. 향후 정성적 공시 요약 및 지배구조 데이터, LLM 분석 모듈을 보강하여 최대 20점 한도로 실데이터를 연동할 예정입니다.
-                </div>
-              </div>
+              {isGrowth ? (
+                <>
+                  <div className="section-header color-return">
+                    <span>④ 성장 재투자 성향 (유보율 우대)</span>
+                    <span className="section-total">{shareholderSum} / 15점</span>
+                  </div>
+                  <div className="section-body">
+                    <div className="indicator-row">
+                      <span className="ind-name">배당 성향 (배점 10점, 낮은 배당선호)</span>
+                      <span className="ind-val">{reinvestPayoutInfo.desc}</span>
+                    </div>
+                    <div className="indicator-row">
+                      <span className="ind-name">당기순이익 흑자여부 (배점 5점)</span>
+                      <span className="ind-val">{netIncPositiveInfo.desc}</span>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="section-header color-return">
+                    <span>④ 주주 환원 및 배당 매력</span>
+                    <span className="section-total">{shareholderSum} / 25점</span>
+                  </div>
+                  <div className="section-body">
+                    <div className="indicator-row">
+                      <span className="ind-name">배당 성향 (배점 15점)</span>
+                      <span className="ind-val">{payoutInfo.desc}</span>
+                    </div>
+                    <div className="indicator-row">
+                      <span className="ind-name">배당 지속 연수 (배점 15점)</span>
+                      <span className="ind-val">{divYearsInfo.desc}</span>
+                    </div>
+                    {decreasePenalty > 0 && (
+                      <div className="indicator-row penalty">
+                        <span className="ind-name">배당 삭감 이력 (감점)</span>
+                        <span className="ind-val" style={{ color: 'var(--color-danger)', fontWeight: 'bold' }}>
+                          -{decreasePenalty}점 감점 (삭감 횟수: {evaluation.dividend_decrease_count}회)
+                        </span>
+                      </div>
+                    )}
+                    <div className="indicator-footer">
+                      * (배당성향 + 배당지속 + 자사주가점 - 삭감감점)에 최소 0점 ~ 최대 25점 한도를 적용합니다.
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* 부문 5: 거버넌스 / PEG */}
+            <div className="breakdown-section">
+              {isGrowth ? (
+                <>
+                  <div className="section-header color-governance">
+                    <span>⑤ 가성비 성장 가치 (PEG 비율)</span>
+                    <span className="section-total">{pegInfo.score} / 10점</span>
+                  </div>
+                  <div className="section-body">
+                    <div className="indicator-row">
+                      <span className="ind-name">PEG Ratio (배점 10점, PER / EPS성장률)</span>
+                      <span className="ind-val">{pegInfo.desc}</span>
+                    </div>
+                    <div className="indicator-footer">
+                      * PEG (Price to Earnings to Growth) 비율은 1.0 이하일 때 최고의 배점을 받습니다.
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="section-header color-governance">
+                    <span>⑤ 시장 및 지배구조 리스크 (거버넌스)</span>
+                    <span className="section-total">0 / 20점</span>
+                  </div>
+                  <div className="section-body">
+                    <div className="indicator-footer" style={{ marginTop: 0, fontSize: '0.85rem' }}>
+                      현재 거버넌스 지표는 1차 0점 고정 상태입니다. 향후 정성적 공시 요약 및 지배구조 데이터, LLM 분석 모듈을 보강하여 최대 20점 한도로 실데이터를 연동할 예정입니다.
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 

@@ -5,6 +5,7 @@ import pandas as pd
 from pj_stock_backend.repositories import stock_repository, daily_price_repository
 from pj_stock_backend.storage.csv_storage import load_dataframe_csv
 from pj_stock_backend.strategies.undervalued_dividend_strategy import screen_undervalued_dividend_stocks
+from pj_stock_backend.strategies.opportunity_growth_strategy import screen_opportunity_growth_stocks
 
 
 def run_stock_evaluation_pipeline(
@@ -76,7 +77,7 @@ def run_stock_evaluation_pipeline(
         return 0
         
     # 4. Run strategy calculations
-    screened = screen_undervalued_dividend_stocks(
+    screened_div = screen_undervalued_dividend_stocks(
         financial_statements=financial_statements,
         dividends=dividends,
         daily_prices=daily_prices,
@@ -84,18 +85,34 @@ def run_stock_evaluation_pipeline(
         as_of_year=business_year
     )
     
-    if screened.empty:
-        print("[eval_pipeline] Warning: Strategy output is empty.")
-        return 0
-        
-    # Add business_year and base_date columns before saving
-    screened["business_year"] = business_year
-    screened["base_date"] = base_date
+    screened_growth = screen_opportunity_growth_stocks(
+        financial_statements=financial_statements,
+        dividends=dividends,
+        daily_prices=daily_prices,
+        stocks=stocks_df,
+        as_of_year=business_year
+    )
     
-    # Map boolean to integer for SQLite compatibility
-    screened["is_candidate"] = screened["is_candidate"].astype(int)
-    
-    # 5. Insert into DB
-    count = stock_repository.upsert_stock_evaluations(connection, screened)
-    print(f"[eval_pipeline] Successfully upserted {count} stock evaluations.")
+    # 5. Save results to DB
+    count = 0
+    if not screened_div.empty:
+        screened_div["business_year"] = business_year
+        screened_div["base_date"] = base_date
+        screened_div["is_candidate"] = screened_div["is_candidate"].astype(int)
+        count_div = stock_repository.upsert_stock_evaluations(connection, screened_div, strategy_type="DIVIDEND")
+        count += count_div
+        print(f"[eval_pipeline] Successfully upserted {count_div} DIVIDEND stock evaluations.")
+    else:
+        print("[eval_pipeline] Warning: DIVIDEND strategy output is empty.")
+
+    if not screened_growth.empty:
+        screened_growth["business_year"] = business_year
+        screened_growth["base_date"] = base_date
+        screened_growth["is_candidate"] = screened_growth["is_candidate"].astype(int)
+        count_growth = stock_repository.upsert_stock_evaluations(connection, screened_growth, strategy_type="GROWTH")
+        count += count_growth
+        print(f"[eval_pipeline] Successfully upserted {count_growth} GROWTH stock evaluations.")
+    else:
+        print("[eval_pipeline] Warning: GROWTH strategy output is empty.")
+
     return count

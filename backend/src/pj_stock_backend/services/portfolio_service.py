@@ -6,17 +6,17 @@ from pj_stock_backend.pipelines.stock_evaluation_pipeline import run_stock_evalu
 from pj_stock_backend.repositories import daily_price_repository
 
 
-def get_evaluations_for_date(db: sqlite3.Connection, base_date: str) -> pd.DataFrame:
-    """Retrieve evaluated stocks for a specific date, running the evaluation pipeline if not present."""
+def get_evaluations_for_date(db: sqlite3.Connection, base_date: str, strategy_type: str = "DIVIDEND") -> pd.DataFrame:
+    """Retrieve evaluated stocks for a specific date and strategy, running the evaluation pipeline if not present."""
     df = pd.read_sql_query(
         """
         SELECT e.*, s.stock_name, s.sector 
         FROM stock_evaluations e 
         JOIN stocks s ON e.stock_code = s.stock_code 
-        WHERE e.base_date = ?
+        WHERE e.base_date = ? AND e.strategy_type = ?
         """,
         db,
-        params=[base_date]
+        params=[base_date, strategy_type]
     )
     if not df.empty:
         return df
@@ -48,20 +48,20 @@ def get_evaluations_for_date(db: sqlite3.Connection, base_date: str) -> pd.DataF
         SELECT e.*, s.stock_name, s.sector 
         FROM stock_evaluations e 
         JOIN stocks s ON e.stock_code = s.stock_code 
-        WHERE e.base_date = ?
+        WHERE e.base_date = ? AND e.strategy_type = ?
         """,
         db,
-        params=[base_date]
+        params=[base_date, strategy_type]
     )
 
 
-def initialize_portfolio(db: sqlite3.Connection, initial_balance: float) -> dict:
-    """Clear all portfolio tables and enter initial positions based on the latest available trade date."""
+def initialize_portfolio(db: sqlite3.Connection, initial_balance: float, strategy_type: str = "DIVIDEND") -> dict:
+    """Clear portfolio tables for the given strategy and enter initial positions based on the latest available trade date."""
     cursor = db.cursor()
-    cursor.execute("DELETE FROM ud_portfolio_status")
-    cursor.execute("DELETE FROM ud_portfolio_holdings")
-    cursor.execute("DELETE FROM ud_portfolio_history")
-    cursor.execute("DELETE FROM ud_portfolio_transactions")
+    cursor.execute("DELETE FROM ud_portfolio_status WHERE strategy_type = ?", (strategy_type,))
+    cursor.execute("DELETE FROM ud_portfolio_holdings WHERE strategy_type = ?", (strategy_type,))
+    cursor.execute("DELETE FROM ud_portfolio_history WHERE strategy_type = ?", (strategy_type,))
+    cursor.execute("DELETE FROM ud_portfolio_transactions WHERE strategy_type = ?", (strategy_type,))
     db.commit()
 
     # Get latest trade date from daily_prices
@@ -70,18 +70,24 @@ def initialize_portfolio(db: sqlite3.Connection, initial_balance: float) -> dict
         return {"status": "error", "message": "No price data in database to initialize portfolio."}
 
     # Get evaluations for the latest date
-    evals = get_evaluations_for_date(db, latest_trade_date)
+    evals = get_evaluations_for_date(db, latest_trade_date, strategy_type)
     if evals.empty:
         return {"status": "error", "message": f"Failed to get evaluations for {latest_trade_date}."}
 
     # Filter for total_score >= 70.0 and is_candidate = 1
     candidates = evals[(evals["total_score"] >= 70.0) & (evals["is_candidate"] == 1)].copy()
     
-    # Sort by total_score desc, dividend_yield desc, market_cap desc
-    candidates = candidates.sort_values(
-        by=["total_score", "dividend_yield", "market_cap"],
-        ascending=[False, False, False]
-    )
+    # Sort candidates dynamically based on strategy type
+    if strategy_type == "DIVIDEND":
+        candidates = candidates.sort_values(
+            by=["total_score", "dividend_yield", "market_cap"],
+            ascending=[False, False, False]
+        )
+    else:
+        candidates = candidates.sort_values(
+            by=["total_score", "revenue_growth", "market_cap"],
+            ascending=[False, False, False]
+        )
 
     holdings_to_insert = []
     txs_to_insert = []
@@ -108,7 +114,8 @@ def initialize_portfolio(db: sqlite3.Connection, initial_balance: float) -> dict
             None,  # exit_date
             None,  # exit_price
             None,  # score_at_exit
-            "ACTIVE"
+            "ACTIVE",
+            strategy_type
         ))
         
         txs_to_insert.append((
@@ -119,7 +126,8 @@ def initialize_portfolio(db: sqlite3.Connection, initial_balance: float) -> dict
             close_price,
             quantity,
             buy_amount,
-            score
+            score,
+            strategy_type
         ))
 
     # Save holdings
@@ -129,8 +137,8 @@ def initialize_portfolio(db: sqlite3.Connection, initial_balance: float) -> dict
             INSERT INTO ud_portfolio_holdings (
                 stock_code, stock_name, entry_date, entry_price, quantity,
                 current_price, valuation, holding_return, score_at_entry,
-                exit_date, exit_price, score_at_exit, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                exit_date, exit_price, score_at_exit, status, strategy_type
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             holdings_to_insert
         )
@@ -141,8 +149,8 @@ def initialize_portfolio(db: sqlite3.Connection, initial_balance: float) -> dict
             """
             INSERT INTO ud_portfolio_transactions (
                 trade_date, stock_code, stock_name, transaction_type,
-                price, quantity, amount, score
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                price, quantity, amount, score, strategy_type
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             txs_to_insert
         )
@@ -151,45 +159,45 @@ def initialize_portfolio(db: sqlite3.Connection, initial_balance: float) -> dict
     cursor.execute(
         """
         INSERT INTO ud_portfolio_status (
-            initial_balance, current_cash, current_valuation, total_asset,
+            strategy_type, initial_balance, current_cash, current_valuation, total_asset,
             mdd, total_return, win_rate
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (initial_balance, 0.0, total_asset, total_asset, 0.0, 0.0, 0.0)
+        (strategy_type, initial_balance, 0.0, total_asset, total_asset, 0.0, 0.0, 0.0)
     )
 
     # Save history
     cursor.execute(
         """
         INSERT INTO ud_portfolio_history (
-            trade_date, cash, valuation, total_asset, daily_return, drawdown
-        ) VALUES (?, ?, ?, ?, ?, ?)
+            trade_date, strategy_type, cash, valuation, total_asset, daily_return, drawdown
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        (latest_trade_date, 0.0, total_asset, total_asset, 0.0, 0.0)
+        (latest_trade_date, strategy_type, 0.0, total_asset, total_asset, 0.0, 0.0)
     )
 
     db.commit()
     return {
         "status": "success", 
-        "message": f"Portfolio initialized on {latest_trade_date} with {len(holdings_to_insert)} active holdings."
+        "message": f"Portfolio initialized on {latest_trade_date} with {len(holdings_to_insert)} active holdings for {strategy_type}."
     }
 
 
-def update_portfolio_to_latest(db: sqlite3.Connection) -> dict:
-    """Advance the virtual portfolio forward using any new trade dates since the last history record."""
+def update_portfolio_to_latest(db: sqlite3.Connection, strategy_type: str = "DIVIDEND") -> dict:
+    """Advance the virtual portfolio forward using any new trade dates since the last history record for the strategy."""
     cursor = db.cursor()
-    cursor.execute("SELECT initial_balance, total_asset FROM ud_portfolio_status LIMIT 1")
+    cursor.execute("SELECT initial_balance, total_asset FROM ud_portfolio_status WHERE strategy_type = ? LIMIT 1", (strategy_type,))
     status_row = cursor.fetchone()
     if not status_row:
-        return {"status": "error", "message": "Portfolio has not been initialized. Please initialize it first."}
+        return {"status": "error", "message": f"Portfolio has not been initialized for {strategy_type}. Please initialize it first."}
     
     initial_balance, last_total_asset = status_row[0], status_row[1]
 
     # Get last historical date recorded in history
-    cursor.execute("SELECT max(trade_date) FROM ud_portfolio_history")
+    cursor.execute("SELECT max(trade_date) FROM ud_portfolio_history WHERE strategy_type = ?", (strategy_type,))
     last_hist_date_row = cursor.fetchone()
     if not last_hist_date_row or not last_hist_date_row[0]:
-        return {"status": "error", "message": "Portfolio history empty. Re-initialize needed."}
+        return {"status": "error", "message": f"Portfolio history empty for {strategy_type}. Re-initialize needed."}
     
     last_hist_date = last_hist_date_row[0]
 
@@ -201,14 +209,14 @@ def update_portfolio_to_latest(db: sqlite3.Connection) -> dict:
     target_dates = [r[0] for r in cursor.fetchall()]
     
     if not target_dates:
-        return {"status": "success", "message": "Portfolio is already up-to-date.", "processed_days": 0}
+        return {"status": "success", "message": f"Portfolio for {strategy_type} is already up-to-date.", "processed_days": 0}
 
     processed_days = 0
     current_total_asset = last_total_asset
 
     for t_date in target_dates:
         # Load evaluations for t_date
-        evals = get_evaluations_for_date(db, t_date)
+        evals = get_evaluations_for_date(db, t_date, strategy_type)
         if evals.empty:
             continue
 
@@ -220,8 +228,9 @@ def update_portfolio_to_latest(db: sqlite3.Connection) -> dict:
             """
             SELECT id, stock_code, stock_name, entry_date, entry_price, current_price, score_at_entry 
             FROM ud_portfolio_holdings
-            WHERE status = 'ACTIVE'
-            """
+            WHERE status = 'ACTIVE' AND strategy_type = ?
+            """,
+            (strategy_type,)
         )
         holdings_before = [dict(r) for r in cursor.fetchall()]
 
@@ -292,10 +301,10 @@ def update_portfolio_to_latest(db: sqlite3.Connection) -> dict:
                     """
                     INSERT INTO ud_portfolio_transactions (
                         trade_date, stock_code, stock_name, transaction_type,
-                        price, quantity, amount, score
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        price, quantity, amount, score, strategy_type
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (t_date, code, hold["stock_name"], "SELL", curr_price, 1, sell_amount, score)
+                    (t_date, code, hold["stock_name"], "SELL", curr_price, 1, sell_amount, score, strategy_type)
                 )
             else:
                 val = curr_price * 1
@@ -319,6 +328,18 @@ def update_portfolio_to_latest(db: sqlite3.Connection) -> dict:
             (~evals["stock_code"].isin(active_holdings_codes))
         ].copy()
 
+        # Sort dynamically based on strategy type
+        if strategy_type == "DIVIDEND":
+            new_candidates = new_candidates.sort_values(
+                by=["total_score", "dividend_yield", "market_cap"],
+                ascending=[False, False, False]
+            )
+        else:
+            new_candidates = new_candidates.sort_values(
+                by=["total_score", "revenue_growth", "market_cap"],
+                ascending=[False, False, False]
+            )
+
         for _, row in new_candidates.iterrows():
             code = row["stock_code"]
             name = row["stock_name"]
@@ -333,26 +354,26 @@ def update_portfolio_to_latest(db: sqlite3.Connection) -> dict:
                 INSERT INTO ud_portfolio_holdings (
                     stock_code, stock_name, entry_date, entry_price, quantity,
                     current_price, valuation, holding_return, score_at_entry,
-                    exit_date, exit_price, score_at_exit, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    exit_date, exit_price, score_at_exit, status, strategy_type
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (code, name, t_date, close_price, qty, close_price, buy_amount, 0.0, score, None, None, None, "ACTIVE")
+                (code, name, t_date, close_price, qty, close_price, buy_amount, 0.0, score, None, None, None, "ACTIVE", strategy_type)
             )
 
             cursor.execute(
                 """
                 INSERT INTO ud_portfolio_transactions (
                     trade_date, stock_code, stock_name, transaction_type,
-                    price, quantity, amount, score
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    price, quantity, amount, score, strategy_type
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (t_date, code, name, "BUY", close_price, qty, buy_amount, score)
+                (t_date, code, name, "BUY", close_price, qty, buy_amount, score, strategy_type)
             )
 
         # 4. Record history for t_date
         daily_return = ((current_total_asset - initial_balance) / initial_balance) * 100
 
-        cursor.execute("SELECT max(total_asset) FROM ud_portfolio_history")
+        cursor.execute("SELECT max(total_asset) FROM ud_portfolio_history WHERE strategy_type = ?", (strategy_type,))
         hist_peak_row = cursor.fetchone()
         hist_peak = hist_peak_row[0] if (hist_peak_row and hist_peak_row[0]) else initial_balance
         peak_asset = max(hist_peak, current_total_asset)
@@ -361,24 +382,25 @@ def update_portfolio_to_latest(db: sqlite3.Connection) -> dict:
         cursor.execute(
             """
             INSERT INTO ud_portfolio_history (
-                trade_date, cash, valuation, total_asset, daily_return, drawdown
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                trade_date, strategy_type, cash, valuation, total_asset, daily_return, drawdown
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (t_date, 0.0, current_total_asset, current_total_asset, daily_return, drawdown)
+            (t_date, strategy_type, 0.0, current_total_asset, current_total_asset, daily_return, drawdown)
         )
         
         cursor.execute(
             """
             UPDATE ud_portfolio_status
             SET current_cash = ?, current_valuation = ?, total_asset = ?, total_return = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE strategy_type = ?
             """,
-            (0.0, current_total_asset, current_total_asset, daily_return)
+            (0.0, current_total_asset, current_total_asset, daily_return, strategy_type)
         )
         
         processed_days += 1
 
     # 5. Final summary metrics updates: MDD & Win Rate
-    cursor.execute("SELECT max(drawdown) FROM ud_portfolio_history")
+    cursor.execute("SELECT max(drawdown) FROM ud_portfolio_history WHERE strategy_type = ?", (strategy_type,))
     mdd_row = cursor.fetchone()
     mdd = mdd_row[0] if (mdd_row and mdd_row[0]) else 0.0
 
@@ -386,8 +408,9 @@ def update_portfolio_to_latest(db: sqlite3.Connection) -> dict:
         """
         SELECT count(*), sum(case when holding_return > 0 then 1 else 0 end) 
         FROM ud_portfolio_holdings 
-        WHERE status = 'CLOSED'
-        """
+        WHERE status = 'CLOSED' AND strategy_type = ?
+        """,
+        (strategy_type,)
     )
     win_row = cursor.fetchone()
     total_closed = win_row[0] if win_row else 0
@@ -399,14 +422,15 @@ def update_portfolio_to_latest(db: sqlite3.Connection) -> dict:
         """
         UPDATE ud_portfolio_status
         SET mdd = ?, win_rate = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE strategy_type = ?
         """,
-        (mdd, win_rate)
+        (mdd, win_rate, strategy_type)
     )
 
     db.commit()
 
     return {
         "status": "success",
-        "message": f"Successfully updated portfolio through {processed_days} trading days.",
+        "message": f"Successfully updated portfolio through {processed_days} trading days for {strategy_type}.",
         "processed_days": processed_days
     }

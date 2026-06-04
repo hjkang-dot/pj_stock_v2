@@ -184,6 +184,7 @@ def get_company_financials(
 def upsert_stock_evaluations(
     connection: sqlite3.Connection,
     evaluations: pd.DataFrame,
+    strategy_type: str = "DIVIDEND",
 ) -> int:
     """Insert or update strategy evaluations for all stocks."""
     if evaluations.empty:
@@ -198,26 +199,28 @@ def upsert_stock_evaluations(
                 cleaned[k] = None
             else:
                 cleaned[k] = v
+        if "strategy_type" not in cleaned:
+            cleaned["strategy_type"] = strategy_type
         cleaned_rows.append(cleaned)
 
     cursor = connection.cursor()
     cursor.executemany(
         """
         insert into stock_evaluations (
-            stock_code, business_year, base_date, close_price, market_cap, net_income,
+            stock_code, business_year, base_date, strategy_type, close_price, market_cap, net_income,
             total_equity, debt_ratio, current_ratio, roe, per, pbr, dividend_yield, cash_dividend_per_share,
             payout_ratio, dividend_years, dividend_decrease_count, revenue_growth, operating_income_growth, eps_growth,
             financial_stability_score, growth_score, undervaluation_score, shareholder_return_score,
             market_governance_score, total_score, is_candidate
         )
         values (
-            :stock_code, :business_year, :base_date, :close_price, :market_cap, :net_income,
+            :stock_code, :business_year, :base_date, :strategy_type, :close_price, :market_cap, :net_income,
             :total_equity, :debt_ratio, :current_ratio, :roe, :per, :pbr, :dividend_yield, :cash_dividend_per_share,
             :payout_ratio, :dividend_years, :dividend_decrease_count, :revenue_growth, :operating_income_growth, :eps_growth,
             :financial_stability_score, :growth_score, :undervaluation_score, :shareholder_return_score,
             :market_governance_score, :total_score, :is_candidate
         )
-        on conflict(stock_code, business_year, base_date) do update set
+        on conflict(stock_code, business_year, base_date, strategy_type) do update set
             close_price = excluded.close_price,
             market_cap = excluded.market_cap,
             net_income = excluded.net_income,
@@ -253,18 +256,19 @@ def upsert_stock_evaluations(
 def get_latest_stock_evaluation(
     connection: sqlite3.Connection,
     stock_code: str,
+    strategy_type: str = "DIVIDEND",
 ) -> dict | None:
-    """Fetch the latest evaluation details for a given stock code."""
+    """Fetch the latest evaluation details for a given stock code and strategy."""
     cursor = connection.cursor()
     cursor.execute(
         """
         select *
         from stock_evaluations
-        where stock_code = :stock_code
+        where stock_code = :stock_code and strategy_type = :strategy_type
         order by base_date desc, business_year desc
         limit 1
         """,
-        {"stock_code": stock_code}
+        {"stock_code": stock_code, "strategy_type": strategy_type}
     )
     row = cursor.fetchone()
     if row:
@@ -275,6 +279,7 @@ def get_latest_stock_evaluation(
 def get_evaluated_stocks(
     connection: sqlite3.Connection,
     *,
+    strategy_type: str = "DIVIDEND",
     market: str | None = None,
     is_candidate: int | None = None,
     search: str | None = None,
@@ -282,8 +287,8 @@ def get_evaluated_stocks(
     offset: int = 0,
 ) -> pd.DataFrame:
     """Retrieve active stocks joined with their latest evaluation, sorted by total_score descending."""
-    conditions = ["s.is_active = 1", "e.rn = 1"]
-    params = {}
+    conditions = ["s.is_active = 1", "e.rn = 1", "e.strategy_type = :strategy_type"]
+    params = {"strategy_type": strategy_type}
 
     if market is not None:
         conditions.append("s.market = :market")
@@ -300,7 +305,7 @@ def get_evaluated_stocks(
     query = f"""
         with latest_eval as (
             select *,
-                   row_number() over (partition by stock_code order by base_date desc, business_year desc) as rn
+                   row_number() over (partition by stock_code, strategy_type order by base_date desc, business_year desc) as rn
             from stock_evaluations
         )
         select s.stock_code, s.stock_name, s.market, s.sector,
@@ -325,13 +330,14 @@ def get_evaluated_stocks(
 def count_evaluated_stocks(
     connection: sqlite3.Connection,
     *,
+    strategy_type: str = "DIVIDEND",
     market: str | None = None,
     is_candidate: int | None = None,
     search: str | None = None,
 ) -> int:
     """Count the total number of evaluated stocks matching the filter conditions."""
-    conditions = ["s.is_active = 1", "e.rn = 1"]
-    params = {}
+    conditions = ["s.is_active = 1", "e.rn = 1", "e.strategy_type = :strategy_type"]
+    params = {"strategy_type": strategy_type}
 
     if market is not None:
         conditions.append("s.market = :market")
@@ -347,8 +353,8 @@ def count_evaluated_stocks(
 
     query = f"""
         with latest_eval as (
-            select stock_code,
-                   row_number() over (partition by stock_code order by base_date desc, business_year desc) as rn
+            select stock_code, strategy_type,
+                   row_number() over (partition by stock_code, strategy_type order by base_date desc, business_year desc) as rn
             from stock_evaluations
         )
         select count(*)

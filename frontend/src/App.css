@@ -598,6 +598,26 @@
   border-color: var(--color-primary);
 }
 
+.naver-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background-color: transparent;
+  border: 1px solid rgba(3, 199, 90, 0.4);
+  padding: 0.6rem 1.2rem;
+  border-radius: var(--radius-md);
+  color: #03c75a;
+  font-weight: 600;
+  transition: all var(--transition-fast);
+  width: fit-content;
+}
+
+.naver-btn:hover {
+  background-color: rgba(3, 199, 90, 0.08);
+  color: #02b34f;
+  border-color: #03c75a;
+}
+
 .stock-detail-header {
   display: flex;
   flex-direction: column;
@@ -1432,5 +1452,86 @@
   }
   to {
     stroke-dashoffset: 0;
+  }
+}
+
+/* Sidebar sub-menus for strategy tabs */
+.nav-sub-menu {
+  list-style: none;
+  padding-left: 1.75rem;
+  margin-top: 0.25rem;
+  margin-bottom: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.nav-sub-item {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.nav-sub-item:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.nav-sub-item.active {
+  background-color: rgba(59, 130, 246, 0.08);
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+/* Strategy Sub-tabs for mobile/convenience */
+.strategy-subtabs {
+  display: flex;
+  gap: 0.5rem;
+  border-bottom: 2px solid var(--border-color);
+  padding-bottom: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.subtab-btn {
+  border: none;
+  background: none;
+  padding: 0.5rem 1rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  position: relative;
+  transition: all var(--transition-fast);
+}
+
+.subtab-btn:hover {
+  color: var(--text-primary);
+}
+
+.subtab-btn.active {
+  color: var(--color-primary);
+}
+
+.subtab-btn.active::after {
+  content: '';
+  position: absolute;
+  bottom: -0.6rem;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: var(--color-primary);
+  border-radius: 2px;
+}
+
+@media (max-width: 768px) {
+  .nav-sub-menu {
+    display: none !important;
   }
 }

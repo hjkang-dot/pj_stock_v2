@@ -524,6 +524,7 @@ class StockEvaluationItem(BaseModel):
     stock_code: str
     business_year: int
     base_date: str
+    strategy_type: str | None = None
     close_price: int | None = None
     market_cap: int | None = None
     net_income: float | None = None
@@ -553,11 +554,12 @@ class StockEvaluationItem(BaseModel):
 @router.get("/{stock_code}/evaluation", response_model=StockEvaluationItem | None)
 def get_stock_evaluation(
     stock_code: str,
+    strategy_type: str = Query("DIVIDEND"),
     db: sqlite3.Connection = Depends(get_db),
 ) -> Any:
-    """Get the latest investment strategy scores and valuation metrics for a stock."""
+    """Get the latest investment strategy scores and valuation metrics for a stock and strategy."""
     normalized_code = stock_code.zfill(6)
-    eval_dict = stock_repository.get_latest_stock_evaluation(db, normalized_code)
+    eval_dict = stock_repository.get_latest_stock_evaluation(db, normalized_code, strategy_type)
     
     if not eval_dict:
         return None
@@ -605,6 +607,7 @@ class EvaluatedStockListResponse(BaseModel):
 
 @router.get("/rankings", response_model=EvaluatedStockListResponse)
 def list_evaluated_stock_rankings(
+    strategy_type: str = Query("DIVIDEND"),
     page: int = Query(1, ge=1, description="Page number"),
     size: int = Query(15, ge=1, le=100, description="Page size"),
     search: str | None = Query(None, description="Search query for stock code, name, or sector"),
@@ -617,6 +620,7 @@ def list_evaluated_stock_rankings(
 
     total = stock_repository.count_evaluated_stocks(
         db,
+        strategy_type=strategy_type,
         market=market,
         is_candidate=is_candidate,
         search=search,
@@ -624,6 +628,7 @@ def list_evaluated_stock_rankings(
 
     df = stock_repository.get_evaluated_stocks(
         db,
+        strategy_type=strategy_type,
         market=market,
         is_candidate=is_candidate,
         search=search,

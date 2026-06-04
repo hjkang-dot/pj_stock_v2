@@ -94,6 +94,7 @@ create table if not exists stock_evaluations (
     stock_code text not null,
     business_year integer not null,
     base_date text not null,
+    strategy_type text not null default 'DIVIDEND',
     close_price integer,
     market_cap integer,
     net_income real,
@@ -120,14 +121,14 @@ create table if not exists stock_evaluations (
     is_candidate integer,
     created_at text not null default current_timestamp,
     updated_at text not null default current_timestamp,
-    unique (stock_code, business_year, base_date)
+    unique (stock_code, business_year, base_date, strategy_type)
 );
 
 create index if not exists idx_stock_evaluations_stock_code
 on stock_evaluations (stock_code);
 
 create table if not exists ud_portfolio_status (
-    id integer primary key autoincrement,
+    strategy_type text primary key,
     initial_balance real not null,
     current_cash real not null,
     current_valuation real not null,
@@ -153,17 +154,20 @@ create table if not exists ud_portfolio_holdings (
     exit_price real,
     score_at_exit real,
     status text not null default 'ACTIVE',
+    strategy_type text not null default 'DIVIDEND',
     updated_at text not null default current_timestamp
 );
 
 create table if not exists ud_portfolio_history (
-    trade_date text primary key,
+    trade_date text not null,
+    strategy_type text not null default 'DIVIDEND',
     cash real not null,
     valuation real not null,
     total_asset real not null,
     daily_return real not null,
     drawdown real not null default 0.0,
-    updated_at text not null default current_timestamp
+    updated_at text not null default current_timestamp,
+    primary key (trade_date, strategy_type)
 );
 
 create table if not exists ud_portfolio_transactions (
@@ -176,5 +180,6 @@ create table if not exists ud_portfolio_transactions (
     quantity integer not null,
     amount real not null,
     score real,
+    strategy_type text not null default 'DIVIDEND',
     created_at text not null default current_timestamp
 );

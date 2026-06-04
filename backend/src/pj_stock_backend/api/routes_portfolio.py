@@ -11,6 +11,7 @@ router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
 
 class PortfolioInitializeRequest(BaseModel):
     initial_balance: float = 100000000.0
+    strategy_type: str = "DIVIDEND"
 
 
 class PortfolioSummaryResponse(BaseModel):
@@ -70,7 +71,7 @@ def initialize_virtual_portfolio(
     db: sqlite3.Connection = Depends(get_db),
 ) -> Any:
     """Clear portfolio history and initialize with fresh cash on the latest available trade date."""
-    res = portfolio_service.initialize_portfolio(db, request.initial_balance)
+    res = portfolio_service.initialize_portfolio(db, request.initial_balance, request.strategy_type)
     if res.get("status") == "error":
         raise HTTPException(status_code=400, detail=res.get("message"))
     return res
@@ -78,10 +79,11 @@ def initialize_virtual_portfolio(
 
 @router.post("/update")
 def update_virtual_portfolio(
+    strategy_type: str = Query("DIVIDEND"),
     db: sqlite3.Connection = Depends(get_db),
 ) -> Any:
     """Manually step the portfolio forward using any new trade dates since the last check."""
-    res = portfolio_service.update_portfolio_to_latest(db)
+    res = portfolio_service.update_portfolio_to_latest(db, strategy_type)
     if res.get("status") == "error":
         raise HTTPException(status_code=400, detail=res.get("message"))
     return res
@@ -89,6 +91,7 @@ def update_virtual_portfolio(
 
 @router.get("/summary", response_model=PortfolioSummaryResponse)
 def get_portfolio_summary(
+    strategy_type: str = Query("DIVIDEND"),
     db: sqlite3.Connection = Depends(get_db),
 ) -> Any:
     """Retrieve the overall stats of the portfolio (balance, return, MDD, win rate)."""
@@ -98,8 +101,10 @@ def get_portfolio_summary(
         SELECT initial_balance, current_cash, current_valuation, total_asset,
                mdd, total_return, win_rate, updated_at
         FROM ud_portfolio_status
+        WHERE strategy_type = ?
         LIMIT 1
-        """
+        """,
+        (strategy_type,)
     )
     row = cursor.fetchone()
     if not row:
@@ -119,6 +124,7 @@ def get_portfolio_summary(
 
 @router.get("/holdings", response_model=list[PortfolioHoldingItem])
 def get_portfolio_holdings(
+    strategy_type: str = Query("DIVIDEND"),
     db: sqlite3.Connection = Depends(get_db),
 ) -> Any:
     """Retrieve all mock investment stock holding and trade records, ordered by return rate descending."""
@@ -129,8 +135,10 @@ def get_portfolio_holdings(
                current_price, valuation, holding_return, score_at_entry, updated_at,
                exit_date, exit_price, score_at_exit, status
         FROM ud_portfolio_holdings
+        WHERE strategy_type = ?
         ORDER BY holding_return DESC
-        """
+        """,
+        (strategy_type,)
     )
     rows = cursor.fetchall()
     return [
@@ -215,6 +223,7 @@ def get_holding_chart(
 
 @router.get("/history", response_model=list[PortfolioHistoryItem])
 def get_portfolio_history(
+    strategy_type: str = Query("DIVIDEND"),
     db: sqlite3.Connection = Depends(get_db),
 ) -> Any:
     """Retrieve the day-by-day asset history for plotting."""
@@ -223,8 +232,10 @@ def get_portfolio_history(
         """
         SELECT trade_date, cash, valuation, total_asset, daily_return, drawdown
         FROM ud_portfolio_history
+        WHERE strategy_type = ?
         ORDER BY trade_date ASC
-        """
+        """,
+        (strategy_type,)
     )
     rows = cursor.fetchall()
     return [
@@ -242,6 +253,7 @@ def get_portfolio_history(
 
 @router.get("/transactions", response_model=list[PortfolioTransactionItem])
 def get_portfolio_transactions(
+    strategy_type: str = Query("DIVIDEND"),
     limit: int = Query(50, ge=1, le=100),
     db: sqlite3.Connection = Depends(get_db),
 ) -> Any:
@@ -252,9 +264,11 @@ def get_portfolio_transactions(
         SELECT id, trade_date, stock_code, stock_name, transaction_type,
                price, quantity, amount, score, created_at
         FROM ud_portfolio_transactions
+        WHERE strategy_type = ?
         ORDER BY trade_date DESC, id DESC
         LIMIT {limit}
-        """
+        """,
+        (strategy_type,)
     )
     rows = cursor.fetchall()
     return [
